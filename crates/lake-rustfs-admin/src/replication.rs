@@ -11,7 +11,7 @@
 //! with the payload's hash signed. The replica's keys travel only in the
 //! remote target's body, to the source.
 
-use contracts::lake_admin::{Credentials, ReplicaTarget, ReplicationState};
+use contracts::lake_admin::{Credentials, ReplicaTarget, ReplicationState, ReplicationSync};
 
 use crate::rustfs::{call, Call, Rustfs};
 use crate::warehouse::passed;
@@ -181,9 +181,87 @@ async fn steps(
     Ok(Outcome::Configured)
 }
 
+/// How far behind `warehouse`'s replication is, from RustFS's replication
+/// metrics (core decision 0078, verified with
+/// `tools/verify/lake_replication_sync.sh`): `pending` is what waits now
+/// (`queued.curr.count`), `failed` what failed to be copied in the last
+/// hour (`failed.lastHour.count`; RustFS counts attempts, so a failure
+/// copied since still counts for the hour, as the user ruled 2026-11-24).
+/// `None` for a warehouse this lake does not have.
+pub async fn sync(
+    lake: &Rustfs,
+    warehouse: &str,
+    keys: &Credentials,
+) -> Result<Option<ReplicationSync>, String> {
+    let src = lake.base(&lake.source);
+    match lake
+        .send(keys, call(&src, "HEAD", format!("/{warehouse}"), &[]))
+        .await?
+    {
+        (404, _) => return Ok(None),
+        (200, _) => {}
+        (status, _) => return Err(format!("HTTP {status}")),
+    }
+    let path = "/rustfs/admin/v3/replicationmetrics".to_string();
+    let (status, text) = lake
+        .send(keys, call(&src, "GET", path, &[("bucket", warehouse)]))
+        .await?;
+    read_metrics(status, &text).map(Some)
+}
+
+/// What RustFS's replication metrics say: no rule (`404
+/// ReplicationConfigurationNotFoundError`), or the counts.
+fn read_metrics(status: u16, text: &str) -> Result<ReplicationSync, String> {
+    if status == 404 && crate::rustfs::code(text) == "ReplicationConfigurationNotFoundError" {
+        return Ok(ReplicationSync {
+            state: ReplicationState::NotConfigured,
+            pending: Some(0),
+            failed: Some(0),
+        });
+    }
+    if status != 200 {
+        let code = crate::rustfs::code(text);
+        return Err(format!("HTTP {status} {code}").trim_end().to_string());
+    }
+    let body: serde_json::Value =
+        serde_json::from_str(text).map_err(|_| "metrics that are not JSON".to_string())?;
+    // RustFS writes the counts as numbers with a fraction (`3.0`).
+    let count = |v: &serde_json::Value| v.as_f64().filter(|n| *n >= 0.0).map(|n| n as u64);
+    let pending = count(&body["queued"]["curr"]["count"]);
+    let failed = count(&body["failed"]["lastHour"]["count"]);
+    match (pending, failed) {
+        (Some(pending), Some(failed)) => Ok(ReplicationSync {
+            state: ReplicationState::Configured,
+            pending: Some(pending),
+            failed: Some(failed),
+        }),
+        _ => Err("metrics without their counts".into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_metrics_say_what_waits_and_what_failed_in_the_hour() {
+        // As RustFS 1.0.5 answered with the replica back (the verification).
+        let back = r#"{"failed":{"lastMinute":{"count":0.0,"bytes":0},"lastHour":{"count":3.0,"bytes":48},"totals":{"count":3.0,"bytes":48}},"queued":{"curr":{"count":0.0,"bytes":0.0}}}"#;
+        let sync = read_metrics(200, back).unwrap();
+        assert_eq!(
+            (sync.state, sync.pending, sync.failed),
+            (ReplicationState::Configured, Some(0), Some(3))
+        );
+        let waiting = r#"{"failed":{"lastHour":{"count":0.0}},"queued":{"curr":{"count":3.0}}}"#;
+        assert_eq!(read_metrics(200, waiting).unwrap().pending, Some(3));
+        let none = "<Error><Code>ReplicationConfigurationNotFoundError</Code></Error>";
+        assert_eq!(
+            read_metrics(404, none).unwrap().state,
+            ReplicationState::NotConfigured
+        );
+        assert!(read_metrics(200, "{}").is_err());
+        assert!(read_metrics(403, "<Error><Code>AccessDenied</Code></Error>").is_err());
+    }
 
     #[test]
     fn the_bodies_say_what_was_ruled() {
