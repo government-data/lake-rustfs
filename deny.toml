@@ -15,7 +15,20 @@
 version = 2
 # Unmaintained crates fail only when this workspace names them directly.
 unmaintained = "workspace"
-ignore = []
+# The two below are the core's own exceptions (its deny.toml), with its
+# reasons; they reach this tree through the core's crates.
+ignore = [
+  # Marvin attack on rsa 0.9: no fixed release exists. It recovers a key from
+  # the timing of *decryptions* with the private key. Here rsa signs throwaway
+  # certificates in infrastructure's CA tests (dev only), and in production
+  # sqlx-mysql (the Dolt catalog, decision 0021) only *encrypts* with the
+  # server's public key. Review by 2027-02-20 (or when rsa 0.10 is out).
+  { id = "RUSTSEC-2023-0071", reason = "no fix; only public-key encryption in production and test certificates; review by 2027-02-20" },
+  # chrono unmaintained: not a vulnerability, and no maintained drop-in
+  # exists. Replacing it (e.g. with jiff) touches every date in the code and
+  # needs its own decision. Review by 2027-02-20.
+  { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, no vulnerability; replacement needs a decision; review by 2027-02-20" },
+]
 
 [sources]
 unknown-registry = "deny"
