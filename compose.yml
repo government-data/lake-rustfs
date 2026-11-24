@@ -1,0 +1,73 @@
+# The lake-rustfs module's compose, run by quality-sdk's update agent as the
+# project `lake-rustfs` on each lake machine:
+#
+#   docker compose --project-name lake-rustfs \
+#     --project-directory /opt/quality-data/lake-rustfs/current \
+#     --file /opt/quality-data/lake-rustfs/current/compose.yml \
+#     --env-file /opt/quality-data/lake-rustfs/.env up -d --no-build --wait
+#
+# Both images come from the signed index, by digest: IMAGE_RUSTFS is the
+# RustFS mirrored into this module's ECR repository
+# (quality-data/lake-rustfs/rustfs@sha256:b81d16a9…1d74, RustFS 1.0.5) and
+# IMAGE_ADMIN the adapter this repository releases. Nothing is pulled from
+# Docker Hub.
+#
+# The services of one lake (core decision 0078): RustFS, on a network of its
+# own with nothing else, and its admin adapter. The gate in front of them,
+# RustFS's TLS from the node agent's certificate and the routes that reach
+# them come with the lake's stacks (core decision 0078, step 16); until then
+# no port is published.
+#
+# Required environment (the module's .env):
+#   RUSTFS_ACCESS_KEY, RUSTFS_SECRET_KEY  the lake's root keys, used once by
+#                                         the installer
+#   QD_MACHINE_NAME   the lake machine's name, as in its certificate
+#   QD_MACHINE_DIR    the node agent's directory (ca.crt, machine.pem)
+name: lake-rustfs
+
+networks:
+  lake:
+    internal: true
+
+volumes:
+  rustfs-data:
+
+services:
+  rustfs:
+    image: ${IMAGE_RUSTFS:?set IMAGE_RUSTFS to the RustFS image by digest}
+    restart: unless-stopped
+    command: ["server", "--address", ":9000", "--console-enable", "/data"]
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:?set RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:?set RUSTFS_SECRET_KEY}
+      RUSTFS_VOLUMES: /data
+      RUSTFS_OBS_LOGGER_LEVEL: ${RUSTFS_LOG_LEVEL:-warn}
+    volumes:
+      - rustfs-data:/data
+    networks: [lake]
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 9000"]
+      interval: 10s
+      retries: 12
+
+  # The lake admin adapter: lake-admin/1 to the core's server alone, with
+  # mTLS of the installation's CA both ways. It keeps no data or secret: its
+  # only files are the node agent's, read-only.
+  admin:
+    image: ${IMAGE_ADMIN:?set IMAGE_ADMIN to the adapter's image by digest}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      QD_LAKE_ADMIN_ADDR: 0.0.0.0:9020
+      QD_LAKE_ADMIN_TLS_DIR: /run/qd-node
+      QD_MACHINE_NAME: ${QD_MACHINE_NAME:?set QD_MACHINE_NAME to the lake machine's name}
+      RUST_LOG: ${LAKE_ADMIN_LOG:-info}
+    volumes:
+      - ${QD_MACHINE_DIR:?set QD_MACHINE_DIR to the node agent's directory}:/run/qd-node:ro
+    networks: [lake]
+    depends_on:
+      rustfs:
+        condition: service_healthy

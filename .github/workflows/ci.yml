@@ -1,7 +1,7 @@
 name: CI
 
 # On every pull request, on main, every week and on a manual run: the secret
-# scan, and the gate `ci` that the other jobs feed.
+# scan, the module's package, and the gate `ci` that the other jobs feed.
 
 on:
   pull_request:
@@ -36,10 +36,43 @@ jobs:
             | tar -xz gitleaks
           ./gitleaks detect --source . --config .gitleaks.toml --redact --no-banner --verbose
 
+  # The module's package, built twice from the same commit: the two must be
+  # the same bytes, since the signed index pins its SHA-256. It holds
+  # module.yaml and compose.yml only, and the compose resolves with the
+  # images by digest.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build the package twice
+        run: |
+          version=$(yq -r '.version' module.yaml)
+          OUT_DIR="$RUNNER_TEMP/one" tools/package.sh "$version"
+          sleep 2
+          OUT_DIR="$RUNNER_TEMP/two" tools/package.sh "$version"
+          one=$(sha256sum "$RUNNER_TEMP/one/lake-rustfs-$version.tar.gz" | cut -d' ' -f1)
+          two=$(sha256sum "$RUNNER_TEMP/two/lake-rustfs-$version.tar.gz" | cut -d' ' -f1)
+          echo "lake-rustfs-$version.tar.gz: $one and $two"
+          test "$one" = "$two"
+          test "$(tar -tzf "$RUNNER_TEMP/one/lake-rustfs-$version.tar.gz" | grep -v '/$' | sort | tr '\n' ' ')" \
+            = "./compose.yml ./module.yaml "
+      - name: The package refuses another version
+        run: |
+          if tools/package.sh 9.9.9; then echo "a version not module.yaml's was packaged"; exit 1; fi
+      - name: The compose resolves
+        env:
+          IMAGE_RUSTFS: 123456789012.dkr.ecr.eu-west-1.amazonaws.com/quality-data/lake-rustfs/rustfs@sha256:b81d16a90ee25bd9511280127ca1471788c6e874cf0f0da759645f46b2dc1d74
+          IMAGE_ADMIN: 123456789012.dkr.ecr.eu-west-1.amazonaws.com/quality-data/lake-rustfs/admin@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSTFS_ACCESS_KEY: not-a-key
+          RUSTFS_SECRET_KEY: not-a-secret
+          QD_MACHINE_NAME: lake-1
+          QD_MACHINE_DIR: /var/lib/qd-node
+        run: docker compose --project-name lake-rustfs --file compose.yml config --quiet
+
   # The one check to require: green when every job passed.
   ci:
     if: always()
-    needs: [secrets]
+    needs: [secrets, package]
     runs-on: ubuntu-latest
     steps:
       - name: Every job passed
