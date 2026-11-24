@@ -347,3 +347,40 @@ async fn the_keys_come_in_headers_and_an_operation_without_them_is_invalid() {
     );
     assert_eq!(lines(&seen).len(), 5);
 }
+
+#[tokio::test]
+async fn the_sync_read_says_what_waits_and_what_failed_in_the_hour() {
+    use contracts::lake_admin::{headers, paths};
+    let metrics = r#"{"failed":{"lastMinute":{"count":0.0,"bytes":0},"lastHour":{"count":3.0,"bytes":48},"totals":{"count":3.0,"bytes":48}},"queued":{"curr":{"count":2.0,"bytes":32.0}}}"#;
+    let none = "<Error><Code>ReplicationConfigurationNotFoundError</Code></Error>";
+    let (port, seen) = gate(vec![
+        OK,
+        ("200 OK", metrics),
+        OK,
+        ("404 Not Found", none),
+        MISSING,
+    ]);
+    let core = served(port).await;
+    let with = [(headers::ADMIN_KEYS, headers::encode(&keys(SOURCE_SECRET)))];
+    let path = paths::replication(W);
+    let read = core.call_with("GET", &path, None, &with).await;
+    let behind = serde_json::json!({"state": "configured", "pending": 2, "failed": 3});
+    assert_eq!(read, (200, behind));
+    assert_eq!(
+        lines(&seen)[1],
+        format!("get /rustfs/admin/v3/replicationmetrics?bucket={W} http/1.1")
+    );
+    let read = core.call_with("GET", &path, None, &with).await;
+    let off = serde_json::json!({"state": "not_configured", "pending": 0, "failed": 0});
+    assert_eq!(read, (200, off));
+    // The contract suite's error cases: an unknown warehouse is `404
+    // unknown`, a body that is no grant `400 invalid`.
+    lake_contract::admin_wire::errors(&core, "qd-tenant-unknown", &with).await;
+    let (status, body) = core.call("GET", &path, None).await;
+    assert_eq!(
+        (status, body["code"].clone()),
+        (400, "invalid".into()),
+        "no keys"
+    );
+    assert_eq!(lines(&seen).len(), 5);
+}

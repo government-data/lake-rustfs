@@ -1,9 +1,10 @@
 //! `lake-admin/1`'s routes (decision 0078): the caller check, `GET /about`,
-//! `GET /health`, `PUT /warehouses/{name}` and its replication, `POST
+//! `GET /health`, `PUT /warehouses/{name}`, its replication (`PUT`, and
+//! `GET` with what waits and what failed), `POST
 //! /policies/session` and the error shape. The keys an operation needs
 //! come in its headers (`contracts::lake_admin::headers`), held for that
 //! call alone and never logged. The other operations (the managed
-//! policies, the replication's `GET`, the credentials and the pools) answer
+//! policies, the credentials and the pools) answer
 //! `404 unknown` until their steps.
 
 use std::sync::Arc;
@@ -40,7 +41,7 @@ pub fn router(lake: Arc<Rustfs>) -> Router {
         )
         .route(
             &wire::paths::replication("{name}"),
-            put(replicate).fallback(unserved),
+            put(replicate).get(replication).fallback(unserved),
         )
         .route(&wire::paths::session_policy(), post(session_policy))
         .fallback(unserved)
@@ -136,6 +137,21 @@ async fn replicate(
     let outcome = replication::configure(&lake, &name, &target, &source, &replica).await;
     let unknown = || Error::new(ErrorCode::Unknown, format!("{what}: no such warehouse"));
     outcome.state().map(Json).ok_or_else(unknown)
+}
+
+/// How far behind the warehouse's replication is; changes nothing.
+async fn replication(
+    State(lake): State<Arc<Rustfs>>,
+    Path(name): Path<String>,
+    map: HeaderMap,
+) -> Result<Json<wire::ReplicationSync>, Error> {
+    let what = format!("GET warehouses/{name}/replication");
+    checked(&name, &what)?;
+    let keys = needed(&map, headers::ADMIN_KEYS, &what)?;
+    let sync = replication::sync(&lake, &name, &keys).await;
+    let lake_error = |e: String| Error::new(ErrorCode::Lake, format!("{what}: {e}"));
+    let unknown = || Error::new(ErrorCode::Unknown, format!("{what}: no such warehouse"));
+    sync.map_err(lake_error)?.map(Json).ok_or_else(unknown)
 }
 
 /// A grant in RustFS's dialect; changes nothing. The policy is answered,
