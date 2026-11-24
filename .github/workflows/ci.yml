@@ -1,7 +1,8 @@
 name: CI
 
 # On every pull request, on main, every week and on a manual run: the secret
-# scan, the module's package, and the gate `ci` that the other jobs feed.
+# scan, the adapter (format, lint, tests, dependencies, image), the module's
+# package, and the gate `ci` that the other jobs feed.
 
 on:
   pull_request:
@@ -35,6 +36,72 @@ jobs:
             "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
             | tar -xz gitleaks
           ./gitleaks detect --source . --config .gitleaks.toml --redact --no-banner --verbose
+
+  # The adapter: format, file sizes, lint and tests, the `lake-admin/1`
+  # contract cases among them (tests/wire.rs) and module.yaml parsed by
+  # quality-sdk's module-manifest (tests/manifest.rs).
+  rust:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Format
+        run: cargo fmt --all -- --check
+      # No Rust file past its hard limit, tests aside (functions: Clippy).
+      - name: File sizes
+        run: |
+          over=$(find crates -name '*.rs' -not -path '*/tests/*' -not -name '*_tests.rs' \
+            -exec awk 'END { if (NR > 800) print FILENAME ": " NR " lines" }' {} \;)
+          if [ -n "$over" ]; then echo "$over"; exit 1; fi
+      - name: Clippy
+        run: cargo clippy -p lake-rustfs-admin --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test -p lake-rustfs-admin --locked
+
+  # Vulnerabilities in the whole tree, and where each crate comes from.
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
+        with:
+          tool: cargo-deny
+      - name: cargo-deny
+        run: cargo deny check advisories sources
+
+  # The adapter's image, built and not pushed, kept for a week:
+  # `gh run download -n image-lake-rustfs-admin`, then
+  # `docker load -i lake-rustfs-admin.tar`.
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          tags: lake-rustfs-admin:${{ github.sha }}
+          outputs: type=docker,dest=${{ runner.temp }}/lake-rustfs-admin.tar
+          cache-from: type=gha,scope=image-lake-rustfs-admin
+          cache-to: type=gha,scope=image-lake-rustfs-admin,mode=max
+      - name: Keep the image
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-lake-rustfs-admin
+          path: ${{ runner.temp }}/lake-rustfs-admin.tar
+          retention-days: 7
+          if-no-files-found: error
 
   # The module's package, built twice from the same commit: the two must be
   # the same bytes, since the signed index pins its SHA-256. It holds
@@ -72,7 +139,7 @@ jobs:
   # The one check to require: green when every job passed.
   ci:
     if: always()
-    needs: [secrets, package]
+    needs: [secrets, rust, deny, image, package]
     runs-on: ubuntu-latest
     steps:
       - name: Every job passed

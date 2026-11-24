@@ -1,0 +1,60 @@
+# The module's Rust workspace: one member, the lake admin adapter.
+[workspace]
+resolver = "2"
+members = ["crates/lake-rustfs-admin"]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+authors = ["quality-data"]
+repository = "https://github.com/quality-data/lake-rustfs"
+
+[workspace.dependencies]
+# The core's crates, from its public repository, pinned by a full commit
+# (quality-sdk decision 0002): until quality-sdk holds `contracts` and
+# `module-testkit`. The pin moves only in a pull request of its own.
+# `contracts` (the lake-admin/1 wire types) and `sigv4` at run time;
+# `lake-contract` (the contract suite) and `testkit` (a test CA) in tests.
+contracts = { git = "https://github.com/quality-data/core", rev = "c4e3115069981f39a8bdb58cb57641f286690d4e" }
+sigv4 = { git = "https://github.com/quality-data/core", rev = "c4e3115069981f39a8bdb58cb57641f286690d4e" }
+lake-contract = { git = "https://github.com/quality-data/core", rev = "c4e3115069981f39a8bdb58cb57641f286690d4e" }
+testkit = { git = "https://github.com/quality-data/core", rev = "c4e3115069981f39a8bdb58cb57641f286690d4e" }
+# The module's manifest model, to check module.yaml in tests.
+module-manifest = { git = "https://github.com/quality-data/quality-sdk", rev = "c646891768955e902c7f9fa0992deed2bdc9c9d0" }
+
+# The same versions as the core's.
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+x509-parser = { version = "0.18", features = ["verify"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "ansi"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+roxmltree = "0.21"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+todo = "warn"
+dbg_macro = "warn"
+# Functions over `too-many-lines-threshold` (clippy.toml) fail CI.
+too_many_lines = "warn"
+
+[profile.dev]
+debug = 1
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

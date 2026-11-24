@@ -1,0 +1,41 @@
+[package]
+name = "lake-rustfs-admin"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+# The lake admin adapter of `lake-rustfs` (core decision 0078, point 8): a
+# service of its own serving `lake-admin/1` with mTLS. Copied from the
+# core's merge commit of its step 11; among the core's crates it depends on
+# `contracts` and `sigv4` alone, by git (the workspace's Cargo.toml).
+[dependencies]
+contracts.workspace = true
+sigv4.workspace = true
+axum.workspace = true
+tokio = { workspace = true, features = ["sync", "signal"] }
+rustls.workspace = true
+tokio-rustls.workspace = true
+# The caller's role: its certificate's `OU` (decision 0066).
+x509-parser.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+# RustFS's S3 and admin APIs (step 11): its errors' XML, the signing date.
+reqwest.workspace = true
+roxmltree.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+# The contract suite's lake-admin/1 cases, and a test CA.
+lake-contract.workspace = true
+testkit.workspace = true
+# module.yaml checked with quality-sdk's model (tests/manifest.rs).
+module-manifest.workspace = true
