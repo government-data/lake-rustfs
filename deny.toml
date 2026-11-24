@@ -2,8 +2,8 @@
 #
 # CI runs `cargo deny check advisories sources` on every pull request and
 # every week: a vulnerability anywhere in the tree fails the build, and a
-# dependency may come only from crates.io or the core's repository (pinned by
-# commit in Cargo.toml until quality-sdk holds the contracts).
+# dependency may come only from crates.io, the core's repository or
+# quality-sdk's (each pinned by commit in Cargo.toml).
 #
 # ## Temporary exceptions
 #
@@ -20,4 +20,7 @@ ignore = []
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-allow-git = ["https://github.com/quality-data/core"]
+allow-git = [
+  "https://github.com/quality-data/core",
+  "https://github.com/quality-data/quality-sdk",
+]
