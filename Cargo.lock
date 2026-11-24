@@ -87,7 +87,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 [[package]]
 name = "application"
 version = "0.1.0"
-source = "git+https://github.com/quality-data/core?rev=c4e3115069981f39a8bdb58cb57641f286690d4e#c4e3115069981f39a8bdb58cb57641f286690d4e"
+source = "git+https://github.com/quality-data/core?rev=025d93fb38a99fcc6c66aae043374d8bf0f57630#025d93fb38a99fcc6c66aae043374d8bf0f57630"
 dependencies = [
  "async-trait",
  "auth-gateway",
@@ -229,7 +229,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 [[package]]
 name = "auth-gateway"
 version = "0.1.0"
-source = "git+https://github.com/quality-data/core?rev=c4e3115069981f39a8bdb58cb57641f286690d4e#c4e3115069981f39a8bdb58cb57641f286690d4e"
+source = "git+https://github.com/quality-data/core?rev=025d93fb38a99fcc6c66aae043374d8bf0f57630#025d93fb38a99fcc6c66aae043374d8bf0f57630"
 dependencies = [
  "async-trait",
  "axum",
@@ -574,7 +574,7 @@ checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 [[package]]
 name = "contracts"
 version = "0.1.0"
-source = "git+https://github.com/quality-data/core?rev=c4e3115069981f39a8bdb58cb57641f286690d4e#c4e3115069981f39a8bdb58cb57641f286690d4e"
+source = "git+https://github.com/quality-data/core?rev=025d93fb38a99fcc6c66aae043374d8bf0f57630#025d93fb38a99fcc6c66aae043374d8bf0f57630"
 dependencies = [
  "async-trait",
  "axum",
@@ -896,7 +896,7 @@ dependencies = [
 [[package]]
 name = "domain"
 version = "0.1.0"
-source = "git+https://github.com/quality-data/core?rev=c4e3115069981f39a8bdb58cb57641f286690d4e#c4e3115069981f39a8bdb58cb57641f286690d4e"
+source = "git+https://github.com/quality-data/core?rev=025d93fb38a99fcc6c66aae043374d8bf0f57630#025d93fb38a99fcc6c66aae043374d8bf0f57630"
 dependencies = [
  "async-trait",
  "sha2",
@@ -1374,7 +1374,7 @@ dependencies = [
 [[package]]
 name = "http-kit"
 version = "0.1.0"
-source = "git+https://github.com/quality-data/core?rev=c4e3115069981f39a8bdb58cb57641f286690d4e#c4e3115069981f39a8bdb58cb57641f286690d4e"
+source = "git+https://github.com/quality-data/core?rev=025d93fb38a99fcc6c66aae043374d8bf0f57630#025d93fb38a99fcc6c66aae043374d8bf0f57630"
 dependencies = [
  "axum",
  "prometheus-client",
@@ -1512,7 +1512,7 @@ dependencies = [
 [[package]]
 name = "iam"
 version = "0.1.0"
-source = "git+https://github.com/quality-data/core?rev=c4e3115069981f39a8bdb58cb57641f286690d4e#c4e3115069981f39a8bdb58cb57641f286690d4e"
+source = "git+https://github.com/quality-data/core?rev=025d93fb38a99fcc6c66aae043374d8bf0f57630#025d93fb38a99fcc6c66aae043374d8bf0f57630"
 dependencies = [
  "serde",
 ]
@@ -1676,7 +1676,7 @@ dependencies = [
 [[package]]
 name = "infrastructure"
 version = "0.1.0"
-source = "git+https://github.com/quality-data/core?rev=c4e3115069981f39a8bdb58cb57641f286690d4e#c4e3115069981f39a8bdb58cb57641f286690d4e"
+source = "git+https://github.com/quality-data/core?rev=025d93fb38a99fcc6c66aae043374d8bf0f57630#025d93fb38a99fcc6c66aae043374d8bf0f57630"
 dependencies = [
  "aes-gcm",
  "application",
@@ -1752,7 +1752,7 @@ dependencies = [
 [[package]]
 name = "lake-contract"
 version = "0.1.0"
-source = "git+https://github.com/quality-data/core?rev=c4e3115069981f39a8bdb58cb57641f286690d4e#c4e3115069981f39a8bdb58cb57641f286690d4e"
+source = "git+https://github.com/quality-data/core?rev=025d93fb38a99fcc6c66aae043374d8bf0f57630#025d93fb38a99fcc6c66aae043374d8bf0f57630"
 dependencies = [
  "application",
  "chrono",
@@ -2311,7 +2311,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 [[package]]
 name = "platform"
 version = "0.1.0"
-source = "git+https://github.com/quality-data/core?rev=c4e3115069981f39a8bdb58cb57641f286690d4e#c4e3115069981f39a8bdb58cb57641f286690d4e"
+source = "git+https://github.com/quality-data/core?rev=025d93fb38a99fcc6c66aae043374d8bf0f57630#025d93fb38a99fcc6c66aae043374d8bf0f57630"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2855,7 +2855,7 @@ dependencies = [
 [[package]]
 name = "schedule-core"
 version = "0.1.0"
-source = "git+https://github.com/quality-data/core?rev=c4e3115069981f39a8bdb58cb57641f286690d4e#c4e3115069981f39a8bdb58cb57641f286690d4e"
+source = "git+https://github.com/quality-data/core?rev=025d93fb38a99fcc6c66aae043374d8bf0f57630#025d93fb38a99fcc6c66aae043374d8bf0f57630"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -3110,7 +3110,7 @@ dependencies = [
 [[package]]
 name = "sigv4"
 version = "0.1.0"
-source = "git+https://github.com/quality-data/core?rev=c4e3115069981f39a8bdb58cb57641f286690d4e#c4e3115069981f39a8bdb58cb57641f286690d4e"
+source = "git+https://github.com/quality-data/core?rev=025d93fb38a99fcc6c66aae043374d8bf0f57630#025d93fb38a99fcc6c66aae043374d8bf0f57630"
 dependencies = [
  "chrono",
  "hmac",
@@ -3529,7 +3529,7 @@ dependencies = [
 [[package]]
 name = "testkit"
 version = "0.1.0"
-source = "git+https://github.com/quality-data/core?rev=c4e3115069981f39a8bdb58cb57641f286690d4e#c4e3115069981f39a8bdb58cb57641f286690d4e"
+source = "git+https://github.com/quality-data/core?rev=025d93fb38a99fcc6c66aae043374d8bf0f57630#025d93fb38a99fcc6c66aae043374d8bf0f57630"
 dependencies = [
  "application",
  "async-trait",
@@ -3550,7 +3550,7 @@ dependencies = [
 [[package]]
 name = "texts"
 version = "0.1.0"
-source = "git+https://github.com/quality-data/core?rev=c4e3115069981f39a8bdb58cb57641f286690d4e#c4e3115069981f39a8bdb58cb57641f286690d4e"
+source = "git+https://github.com/quality-data/core?rev=025d93fb38a99fcc6c66aae043374d8bf0f57630#025d93fb38a99fcc6c66aae043374d8bf0f57630"
 dependencies = [
  "serde_json",
  "tokio",
