@@ -1,0 +1,7 @@
+target/
+dist/
+docs/
+.git/
+.github/
+.env
+.env.*
