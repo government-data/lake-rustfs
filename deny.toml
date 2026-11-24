@@ -1,0 +1,23 @@
+# cargo-deny configuration for CI's dependency audit.
+#
+# CI runs `cargo deny check advisories sources` on every pull request and
+# every week: a vulnerability anywhere in the tree fails the build, and a
+# dependency may come only from crates.io or the core's repository (pinned by
+# commit in Cargo.toml until quality-sdk holds the contracts).
+#
+# ## Temporary exceptions
+#
+# A vulnerability with no fix yet, assessed as not exploitable here, goes in
+# `ignore` with its reason and a review date. Keep the list empty when there
+# is nothing to ignore.
+
+[advisories]
+version = 2
+# Unmaintained crates fail only when this workspace names them directly.
+unmaintained = "workspace"
+ignore = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = ["https://github.com/quality-data/core"]
