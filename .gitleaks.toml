@@ -1,0 +1,20 @@
+# gitleaks configuration for the CI secret scan.
+#
+# gitleaks' built-in rules, narrowed only for fake credentials in the tests.
+# A real secret anywhere else still fails the scan.
+
+title = "lake-rustfs secret scan"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fake credentials in tests are not real secrets"
+paths = [
+  '''.*/tests/.*''',
+]
+# The AWS documentation's example credentials (SigV4 test vector).
+regexes = [
+  '''AKIAIOSFODNN7EXAMPLE''',
+  '''wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY''',
+]

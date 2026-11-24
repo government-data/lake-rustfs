@@ -1,0 +1,52 @@
+name: CI
+
+# On every pull request, on main, every week and on a manual run: the secret
+# scan, and the gate `ci` that the other jobs feed.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # Weekly: a vulnerability disclosed against an unchanged dependency.
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # gitleaks over the full history: a secret can come in any file.
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks
+        env:
+          GITLEAKS_VERSION: 8.21.2
+        run: |
+          curl -sSL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          ./gitleaks detect --source . --config .gitleaks.toml --redact --no-banner --verbose
+
+  # The one check to require: green when every job passed.
+  ci:
+    if: always()
+    needs: [secrets]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for r in $RESULTS; do
+            if [ "$r" != "success" ]; then echo "a job ended $r"; exit 1; fi
+          done
+          echo "CI passed"
