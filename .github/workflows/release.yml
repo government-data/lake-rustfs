@@ -1,0 +1,135 @@
+name: Release
+
+# A `v*` tag releases the module (quality-sdk decision 0002, step 15 and its
+# amendment to steps 6 and 16): the lake admin adapter's image is pushed to
+# ECR, and the package is built, kept as the run's artifact and its SHA-256
+# printed. The tag must be `v` + the `version` of module.yaml at the tagged
+# commit (the module's one version source); the image is tagged with that
+# version, without the `v`. The tags are immutable and builds are not
+# reproducible, so if the version is already in ECR the image is not built
+# again: its digest is printed and nothing is pushed. A broken version is
+# fixed by a new version.
+#
+# GitHub's OIDC token is exchanged for the module's role
+# (`quality-data-publish-lake-rustfs`), which may push only to this module's
+# admin repository; RustFS's mirror is never touched here. Nothing is written
+# to S3: the package reaches an index through `quality-sdk publish`.
+# The repository variables AWS_PUBLISH_ROLE and AWS_REGION name the role and
+# its region.
+
+on:
+  push:
+    tags: ["v*"]
+
+# A tag is released once at a time; a second run waits instead of racing.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: The tag matches module.yaml's version
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(yq -r '.version' module.yaml)
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "::error::module.yaml has no version"; exit 1
+          fi
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::tag $TAG is not v + module.yaml's version ($version)"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  push:
+    needs: version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      REPOSITORY: quality-data/lake-rustfs/admin
+    steps:
+      - name: AWS credentials from the module's role
+        id: aws
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_PUBLISH_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: release-admin-${{ github.run_id }}
+      - name: Is the version already in ECR
+        id: existing
+        run: |
+          if digest=$(aws ecr describe-images --repository-name "$REPOSITORY" \
+            --image-ids imageTag="$VERSION" --query 'imageDetails[0].imageDigest' \
+            --output text 2>"$RUNNER_TEMP/err.txt"); then
+            :
+          elif grep -q ImageNotFoundException "$RUNNER_TEMP/err.txt"; then
+            digest=""
+          else
+            cat "$RUNNER_TEMP/err.txt" >&2; exit 1
+          fi
+          if [ -n "$digest" ] && [ "$digest" != "None" ]; then
+            echo "$REPOSITORY:$VERSION already exists: $digest (not pushed again)"
+            echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.existing.outputs.digest == ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: steps.existing.outputs.digest == ''
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Sign in to ECR
+        if: steps.existing.outputs.digest == ''
+        env:
+          REGISTRY: ${{ steps.aws.outputs.aws-account-id }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com
+        run: aws ecr get-login-password | docker login --username AWS --password-stdin "$REGISTRY"
+      # One image manifest, no attestations: the digest the index pins is the
+      # image's.
+      - name: Build and push
+        id: build
+        if: steps.existing.outputs.digest == ''
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ steps.aws.outputs.aws-account-id }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ env.REPOSITORY }}:${{ env.VERSION }}
+      - name: The digest
+        env:
+          DIGEST: ${{ steps.existing.outputs.digest || steps.build.outputs.digest }}
+        run: |
+          echo "$REPOSITORY:$VERSION $DIGEST"
+          echo "- \`$REPOSITORY:$VERSION\` \`$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # The package, from the tagged commit: kept as the run's artifact, its
+  # SHA-256 printed. Not uploaded anywhere: its first index comes later.
+  package:
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build the package
+        run: |
+          OUT_DIR="$RUNNER_TEMP/dist" tools/package.sh "$VERSION"
+          sum=$(sha256sum "$RUNNER_TEMP/dist/lake-rustfs-$VERSION.tar.gz" | cut -d' ' -f1)
+          echo "lake-rustfs-$VERSION.tar.gz $sum"
+          echo "- \`lake-rustfs-$VERSION.tar.gz\` \`sha256:$sum\`" >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: package-lake-rustfs
+          path: ${{ runner.temp }}/dist/lake-rustfs-${{ env.VERSION }}.tar.gz
+          if-no-files-found: error
