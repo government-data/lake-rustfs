@@ -38,3 +38,11 @@ fn rustfs_data_is_critical() {
     assert_eq!(critical.volumes[0].service, "rustfs");
     assert_eq!(m.health.services, ["rustfs", "admin"]);
 }
+
+#[test]
+fn rustfs_data_is_backed_up_by_the_replica_not_copied() {
+    let m = manifest();
+    let replicated: Vec<_> = m.data.replicated().map(|v| v.name.as_str()).collect();
+    assert_eq!(replicated, ["rustfs-data"]);
+    assert!(m.data.dumped().volumes.is_empty());
+}

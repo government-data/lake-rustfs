@@ -21,7 +21,7 @@ sigv4 = { git = "https://github.com/quality-data/core", rev = "025d93fb38a99fcc6
 lake-contract = { git = "https://github.com/quality-data/core", rev = "025d93fb38a99fcc6c66aae043374d8bf0f57630" }
 testkit = { git = "https://github.com/quality-data/core", rev = "025d93fb38a99fcc6c66aae043374d8bf0f57630" }
 # The module's manifest model, to check module.yaml in tests.
-module-manifest = { git = "https://github.com/quality-data/quality-sdk", rev = "c646891768955e902c7f9fa0992deed2bdc9c9d0" }
+module-manifest = { git = "https://github.com/quality-data/quality-sdk", rev = "62081f6c953892d04597387bf3667d123dbec4d7" }
 
 # The same versions as the core's.
 axum = "0.8"
