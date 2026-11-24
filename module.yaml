@@ -39,12 +39,14 @@ health:
   services: [rustfs, admin]
 
 # RustFS's data is the module's: kept on remove, deleted only by purge. It is
-# critical, and its backup is the replica in sync: an update of this module
-# goes ahead only when the replica is in sync and every node is healthy, and
-# with no replica it does not go ahead. The adapter keeps no data.
+# critical, and its backup is the replica in sync (`backup: replica`): the
+# agent does not copy it, and an update of this module goes ahead only when
+# the core says the replica is in sync and every node is healthy; with no
+# replica it does not go ahead. The adapter keeps no data.
 data:
   volumes:
     - name: rustfs-data
       service: rustfs
       path: /data
       critical: true
+      backup: replica
