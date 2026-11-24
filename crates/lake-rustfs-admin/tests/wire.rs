@@ -147,10 +147,12 @@ async fn a_grant_is_translated_twice_alike_and_a_bad_one_refused() {
     let answer: wire::SessionPolicy = serde_json::from_value(first.1).unwrap();
     assert!(answer.policy.contains("arn:aws:s3:::qd-tenant-a1/*"));
 
-    // The contract suite's error cases: a body that is no grant is `400
-    // invalid`; an unknown warehouse's replication, `404 unknown` (its
-    // `GET` is not served yet).
-    admin_wire::errors(&core, "qd-tenant-unknown").await;
+    // A body that is no grant is `400 invalid`; the contract suite's error
+    // cases, which need a lake, are in `tests/rustfs.rs`.
+    let (status, body) = core
+        .call("POST", &path, Some(&serde_json::json!({"no": "grant"})))
+        .await;
+    assert_eq!((status, body["code"].clone()), (400, "invalid".into()));
     let unsafe_grant = serde_json::json!({"warehouse": "qd-w", "write_objects_under": "../x"});
     let (status, body) = core.call("POST", &path, Some(&unsafe_grant)).await;
     assert_eq!(status, 400, "{body}");

@@ -16,10 +16,10 @@ repository = "https://github.com/quality-data/lake-rustfs"
 # `module-testkit`. The pin moves only in a pull request of its own.
 # `contracts` (the lake-admin/1 wire types) and `sigv4` at run time;
 # `lake-contract` (the contract suite) and `testkit` (a test CA) in tests.
-contracts = { git = "https://github.com/quality-data/core", rev = "c4e3115069981f39a8bdb58cb57641f286690d4e" }
-sigv4 = { git = "https://github.com/quality-data/core", rev = "c4e3115069981f39a8bdb58cb57641f286690d4e" }
-lake-contract = { git = "https://github.com/quality-data/core", rev = "c4e3115069981f39a8bdb58cb57641f286690d4e" }
-testkit = { git = "https://github.com/quality-data/core", rev = "c4e3115069981f39a8bdb58cb57641f286690d4e" }
+contracts = { git = "https://github.com/quality-data/core", rev = "025d93fb38a99fcc6c66aae043374d8bf0f57630" }
+sigv4 = { git = "https://github.com/quality-data/core", rev = "025d93fb38a99fcc6c66aae043374d8bf0f57630" }
+lake-contract = { git = "https://github.com/quality-data/core", rev = "025d93fb38a99fcc6c66aae043374d8bf0f57630" }
+testkit = { git = "https://github.com/quality-data/core", rev = "025d93fb38a99fcc6c66aae043374d8bf0f57630" }
 # The module's manifest model, to check module.yaml in tests.
 module-manifest = { git = "https://github.com/quality-data/quality-sdk", rev = "c646891768955e902c7f9fa0992deed2bdc9c9d0" }
 
