@@ -1,7 +1,7 @@
 //! The module's `module.yaml`, parsed by quality-sdk's `module-manifest`:
 //! the manifest an installation's agent reads from the package.
 
-use module_manifest::Manifest;
+use module_manifest::{Manifest, Strategy};
 
 fn manifest() -> Manifest {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../module.yaml");
@@ -45,4 +45,16 @@ fn rustfs_data_is_backed_up_by_the_replica_not_copied() {
     let replicated: Vec<_> = m.data.replicated().map(|v| v.name.as_str()).collect();
     assert_eq!(replicated, ["rustfs-data"]);
     assert!(m.data.dumped().volumes.is_empty());
+}
+
+#[test]
+fn the_lake_and_its_replica_each_run_rustfs_its_gate_and_the_adapter() {
+    let m = manifest();
+    let roles = &m.topology.as_ref().unwrap().roles;
+    let names: Vec<&str> = roles.iter().map(|r| r.name.as_str()).collect();
+    assert_eq!(names, ["lake", "lake-replica"]);
+    for r in roles {
+        assert_eq!(r.services, ["rustfs", "gate", "admin"], "{}", r.name);
+        assert_eq!(r.strategy, Strategy::All, "{}", r.name);
+    }
 }
