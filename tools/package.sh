@@ -4,7 +4,8 @@
 #   tools/package.sh VERSION        # VERSION must be module.yaml's
 #
 # writes lake-rustfs-VERSION.tar.gz (in OUT_DIR, default dist/) with, at its
-# root, module.yaml and compose.yml.
+# root, module.yaml and compose.yml, and the entrypoints compose.yml mounts
+# (compose/).
 #
 # The files are taken from the commit (HEAD), never the working tree, so
 # nothing local (.env, keys) can come in. Regular files and directories only,
@@ -16,7 +17,7 @@ export LC_ALL=C
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
-files=(module.yaml compose.yml)
+files=(module.yaml compose.yml compose/rustfs-drives.sh compose/rustfs-tls.sh compose/lake-gate.sh)
 
 version="${1:-}"
 want="$(git show HEAD:module.yaml | sed -n 's/^version: *\([^ #]*\).*$/\1/p')"

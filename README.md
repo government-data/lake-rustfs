@@ -14,10 +14,19 @@ it.
 - `Dockerfile`: the adapter's image (distroless, non-root, port 9020).
 - `module.yaml`: the module's manifest for quality-sdk, and its one version
   source.
-- `compose.yml`: what an installation runs, the images by digest from the
-  signed index (`IMAGE_RUSTFS`, `IMAGE_ADMIN`).
+- `compose.yml`: what an installation runs on the lake's machine, the
+  images by digest from the signed index (`IMAGE_RUSTFS`, `IMAGE_GATE`,
+  `IMAGE_ADMIN`): RustFS with the machine's certificate, the gate in front
+  of it (published on `RUSTFS_PORT`, 9000) and the adapter (published on
+  `LAKE_ADMIN_PORT`, 9020). One node, with one drive by default or several
+  (`LAKE_DRIVES`, each a disk of its own mounted under `LAKE_DATA` as `1`,
+  `2`, …; four advised, since a one-drive node cannot grow in place).
+- `compose/`: the entrypoints `compose.yml` mounts: RustFS's drives and
+  TLS, and the gate.
 - `tools/package.sh`: the module's package, `lake-rustfs-<version>.tar.gz`,
   the same bytes for the same commit.
+- `tools/verify/`: scripts that check the compose against Docker and RustFS,
+  run by hand.
 
 ## Build
 

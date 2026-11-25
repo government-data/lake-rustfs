@@ -15,7 +15,9 @@ decision 0002): the lake on RustFS. It provides the capability `lake`
 - `Dockerfile`: the adapter's image.
 - `module.yaml`: the module's manifest, its one version source.
 - `compose.yml`: the services an installation runs, the images by digest
-  from the signed index.
+  from the signed index; `compose/` the entrypoints it mounts.
+- `tools/verify/`: scripts that check external behaviour (Docker, RustFS),
+  run alone, their containers `qs-verify-…` removed in a trap.
 - `tools/package.sh`: the module's package, deterministic.
 - `docs/`: internal documentation (decisions, implementation).
   **Ignored by git, never committed, pushed or published.**

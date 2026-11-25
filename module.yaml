@@ -2,7 +2,7 @@
 # on RustFS. Its version is the module's one version source: a release tag is
 # `v` + this version, and tools/package.sh refuses any other.
 name: lake-rustfs
-version: 0.1.0
+version: 0.2.0
 
 # The capability `lake` and the protocols it promises. The properties are
 # what a consumer reads from the core, never assumes (core decision 0078,
@@ -26,8 +26,9 @@ provides:
 # apps.yml for now: the console runs on the lake's machines behind the gate,
 # not beside the core's Traefik.
 
-# The main lake and its replica each run RustFS and the adapter on their own
-# machines, with their own keys (accepted, not read yet).
+# The main lake and its replica each run RustFS, its gate and the adapter on
+# their own machines, with their own keys (accepted, not read yet). A lake
+# may be one node, of one drive or of several (compose.yml, LAKE_DRIVES).
 topology:
   roles:
     - name: lake
@@ -36,13 +37,15 @@ topology:
       strategy: simultaneous
 
 health:
-  services: [rustfs, admin]
+  services: [rustfs, gate, admin]
 
 # RustFS's data is the module's: kept on remove, deleted only by purge. It is
-# critical, and its backup is the replica in sync (`backup: replica`): the
-# agent does not copy it, and an update of this module goes ahead only when
-# the core says the replica is in sync and every node is healthy; with no
-# replica it does not go ahead. The adapter keeps no data.
+# critical, and an in-sync replica is its backup (`backup: replica`). The
+# replica is optional: with one configured, an update of this module goes
+# ahead only when the core says it is in sync and every node is healthy;
+# with none, the agent backs the volume up with a checked copy first, as any
+# critical volume (quality-sdk decision 0012). Every drive is under /data.
+# The adapter keeps no data.
 data:
   volumes:
     - name: rustfs-data

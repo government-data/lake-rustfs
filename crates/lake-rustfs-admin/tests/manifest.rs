@@ -36,7 +36,7 @@ fn rustfs_data_is_critical() {
     let critical = m.data.critical();
     assert_eq!(critical.volumes.len(), 1);
     assert_eq!(critical.volumes[0].service, "rustfs");
-    assert_eq!(m.health.services, ["rustfs", "admin"]);
+    assert_eq!(m.health.services, ["rustfs", "gate", "admin"]);
 }
 
 #[test]
