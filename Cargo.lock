@@ -1981,7 +1981,7 @@ dependencies = [
 [[package]]
 name = "module-manifest"
 version = "0.1.0"
-source = "git+https://github.com/government-data/quality-sdk?rev=62081f6c953892d04597387bf3667d123dbec4d7#62081f6c953892d04597387bf3667d123dbec4d7"
+source = "git+https://github.com/government-data/quality-sdk?rev=aedbd996a1e6e02d87a87c151b6f54ed12c5f8ef#aedbd996a1e6e02d87a87c151b6f54ed12c5f8ef"
 dependencies = [
  "semver",
  "serde",
