@@ -150,6 +150,9 @@ mod tests {
         let spaced = keys("Ab-_0123456789abcdefgh", "a secret with spaces");
         assert!(refused(&spaced, &admin).is_some());
         let theirs = keys("qd-platform-admin", "a-secret-the-agent-generated");
-        assert_eq!(refused(&theirs, &admin), Some("the access key is the admin's"));
+        assert_eq!(
+            refused(&theirs, &admin),
+            Some("the access key is the admin's")
+        );
     }
 }

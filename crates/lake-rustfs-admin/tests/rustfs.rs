@@ -399,8 +399,9 @@ fn given() -> Credentials {
 async fn a_query_engines_user_is_its_policy_its_user_and_the_two_attached() {
     use lake_rustfs_admin::credentials::{self, POLICY, POLICY_NAME};
     let (port, seen) = gate(vec![OK, OK, OK]);
-    let made = credentials::ensure_query_engine(&lake(port), &keys(SOURCE_SECRET), &given());
-    assert_eq!(made.await, Ok(()));
+    let (lake, admin) = (lake(port), keys(SOURCE_SECRET));
+    let made = credentials::ensure_query_engine(&lake, &admin, &given()).await;
+    assert_eq!(made, Ok(()));
     let seen = seen.lock().unwrap().clone();
     let lines: Vec<&str> = seen.iter().map(|s| s.line.as_str()).collect();
     let access = GIVEN_ACCESS.to_ascii_lowercase();
@@ -431,12 +432,13 @@ async fn a_refused_step_of_the_user_says_which_and_stops() {
     use lake_rustfs_admin::credentials::{self, Failed};
     let refusal = "<Error><Code>AccessDenied</Code><Message>m</Message></Error>";
     let (port, seen) = gate(vec![OK, ("403 Forbidden", refusal)]);
-    let made = credentials::ensure_query_engine(&lake(port), &keys(SOURCE_SECRET), &given());
+    let (lake, admin) = (lake(port), keys(SOURCE_SECRET));
+    let made = credentials::ensure_query_engine(&lake, &admin, &given()).await;
     let failed = Failed {
         step: "user",
         detail: "HTTP 403 AccessDenied".into(),
     };
-    assert_eq!(made.await, Err(failed));
+    assert_eq!(made, Err(failed));
     assert_eq!(lines(&seen).len(), 2, "the policy is not attached");
 }
 
@@ -475,7 +477,11 @@ async fn put_credentials_refuses_another_kind_and_a_request_it_cannot_serve() {
     for kind in ["bogus", "root", "admin", "sts-issuer"] {
         let path = format!("{}/credentials/{kind}", contracts::lake_admin::BASE);
         let (status, body) = core.call_with("PUT", &path, Some(&held), &admin).await;
-        assert_eq!((status, body["code"].clone()), (404, "unknown".into()), "{kind}");
+        assert_eq!(
+            (status, body["code"].clone()),
+            (404, "unknown".into()),
+            "{kind}"
+        );
         assert!(body["error"].as_str().unwrap().contains(kind), "{body}");
     }
     let path = paths::credentials(CredentialKind::QueryEngine);
@@ -489,12 +495,20 @@ async fn put_credentials_refuses_another_kind_and_a_request_it_cannot_serve() {
     ];
     for (body, headers) in &invalid {
         let (status, answer) = core.call_with("PUT", &path, Some(body), headers).await;
-        assert_eq!((status, answer["code"].clone()), (400, "invalid".into()), "{body}");
+        assert_eq!(
+            (status, answer["code"].clone()),
+            (400, "invalid".into()),
+            "{body}"
+        );
     }
     assert!(seen.lock().unwrap().is_empty(), "nothing asked of the lake");
 
     let (status, body) = core.call_with("PUT", &path, Some(&held), &admin).await;
-    assert_eq!((status, body["code"].clone()), (502, "lake".into()), "{body}");
+    assert_eq!(
+        (status, body["code"].clone()),
+        (502, "lake".into()),
+        "{body}"
+    );
     assert_eq!(body["retryable"], true);
     let text = body.to_string();
     assert!(text.contains("policy: HTTP 403 AccessDenied"), "{text}");
