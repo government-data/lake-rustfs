@@ -1,31 +1,66 @@
 //! `PUT /credentials/{kind}` (core decision 0078's table, as amended by
-//! decision 0091's rulings 46 and 50): the lake's own users. Served here
-//! for `query-engine`, a query engine's user (Trino's coordinator): its
-//! keys are given (read-only files the agent generated), so the adapter
-//! makes or updates the user **with them** and answers them, and never
-//! makes keys of its own. Every call is signed with the lake's admin keys
-//! the core sent for it, never root, and none of them is logged.
+//! decision 0091's rulings 46, 50 and 51): the lake's own users whose keys
+//! are given (read-only files the agent generated). Served here for
+//! `query-engine` (Trino's coordinator) and `sts-issuer` (the user the
+//! core calls STS `AssumeRole` with): the adapter makes or updates the
+//! user **with the given keys** and answers them, and never makes keys of
+//! its own. Every call is signed with the lake's admin keys the core sent
+//! for it, never root, and none of them is logged.
 //!
-//! The user's policy is [`POLICY`], the canned policy [`POLICY_NAME`]: the
-//! objects and the catalog of the installation's warehouses (`qd-tenant-*`)
-//! and nothing else; no bucket made, no admin API. Verified with RustFS
-//! 1.0.5 (`tools/verify/rustfs_query_engine.sh`): the admin user may make
-//! the three, each answers 200 again on a second run; `add-user` with
-//! another secret for the same access key takes it and refuses the old
-//! one; `set-user-or-group-policy` replaces a policy attached before.
+//! Each kind's user gets its canned policy ([`User`]): the objects and the
+//! catalog of the installation's warehouses (`qd-tenant-*`) and nothing
+//! else; no bucket made, no admin API. Verified with RustFS 1.0.5
+//! (`tools/verify/rustfs_lake_users.sh`): the admin user may make the
+//! three, each answers 200 again on a second run; `add-user` with another
+//! secret for the same access key takes it and refuses the old one;
+//! `set-user-or-group-policy` replaces a policy attached before; the STS
+//! issuer's `AssumeRole` with a session policy gives credentials narrowed
+//! to it.
 
-use contracts::lake_admin::Credentials;
+use contracts::lake_admin::{CredentialKind, Credentials};
 use serde_json::json;
 
 use crate::rustfs::{call, code, Answer, Rustfs};
 
-/// The canned policy a query engine's user gets.
-pub const POLICY_NAME: &str = "qd-query-engine";
-
 /// What a query engine may do: read and write objects, and use the
 /// catalog, in the installation's warehouses alone. One line, as
-/// `tools/verify/rustfs_query_engine.sh` reads it.
-pub const POLICY: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetBucketLocation","s3:ListBucket","s3:ListBucketMultipartUploads","s3:GetObject","s3:PutObject","s3:DeleteObject","s3:AbortMultipartUpload","s3:ListMultipartUploadParts"],"Resource":["arn:aws:s3:::qd-tenant-*","arn:aws:s3:::qd-tenant-*/*"]},{"Effect":"Allow","Action":["admin:GetTableCatalog","admin:GetTableBucket","admin:GetTableNamespace","admin:SetTableNamespace","admin:UpdateTableNamespaceProperties","admin:DeleteTableNamespace","admin:GetTable","admin:GetTableMetadata","admin:GetTableMetadataLocation","admin:CreateTable","admin:CommitTable","admin:SetTableMetadata","admin:SetTableMetadataLocation","admin:RegisterTable","admin:DeleteTable"],"Resource":["arn:aws:s3:::qd-tenant-*","arn:aws:s3:::qd-tenant-*/*"]}]}"#;
+/// `tools/verify/rustfs_lake_users.sh` reads it.
+pub const QUERY_ENGINE_POLICY: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetBucketLocation","s3:ListBucket","s3:ListBucketMultipartUploads","s3:GetObject","s3:PutObject","s3:DeleteObject","s3:AbortMultipartUpload","s3:ListMultipartUploadParts"],"Resource":["arn:aws:s3:::qd-tenant-*","arn:aws:s3:::qd-tenant-*/*"]},{"Effect":"Allow","Action":["admin:GetTableCatalog","admin:GetTableBucket","admin:GetTableNamespace","admin:SetTableNamespace","admin:UpdateTableNamespaceProperties","admin:DeleteTableNamespace","admin:GetTable","admin:GetTableMetadata","admin:GetTableMetadataLocation","admin:CreateTable","admin:CommitTable","admin:SetTableMetadata","admin:SetTableMetadataLocation","admin:RegisterTable","admin:DeleteTable"],"Resource":["arn:aws:s3:::qd-tenant-*","arn:aws:s3:::qd-tenant-*/*"]}]}"#;
+
+/// The STS issuer's ceiling (decision 0030; the core's
+/// `infra/rustfs/issuer/policy.json`, moved here by decision 0078): every
+/// job's session policy narrows it, so it holds what any grant may ask
+/// (`crate::policy`) in the warehouses, and nothing else. One line, as
+/// `tools/verify/rustfs_lake_users.sh` reads it.
+pub const STS_ISSUER_POLICY: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetBucketLocation","s3:ListBucket","s3:ListBucketMultipartUploads","s3:GetObject","s3:PutObject","s3:DeleteObject","s3:AbortMultipartUpload","s3:ListMultipartUploadParts"],"Resource":["arn:aws:s3:::qd-tenant-*","arn:aws:s3:::qd-tenant-*/*"]},{"Effect":"Allow","Action":["admin:GetTableCatalog","admin:GetTableBucket","admin:GetTableNamespace","admin:SetTableNamespace","admin:GetTable","admin:GetTableMetadata","admin:GetTableMetadataLocation","admin:CreateTable","admin:CommitTable","admin:SetTableMetadata","admin:SetTableMetadataLocation","admin:DeleteTable","admin:DeleteTableNamespace"],"Resource":["arn:aws:s3:::qd-tenant-*","arn:aws:s3:::qd-tenant-*/*"]}]}"#;
+
+/// A kind of user whose keys are given: its canned policy's name and text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct User {
+    pub policy_name: &'static str,
+    pub policy: &'static str,
+}
+
+/// A query engine's user.
+pub const QUERY_ENGINE: User = User {
+    policy_name: "qd-query-engine",
+    policy: QUERY_ENGINE_POLICY,
+};
+
+/// The STS issuer's user, its policy named as the core's script named it.
+pub const STS_ISSUER: User = User {
+    policy_name: "qd-sts-issuer",
+    policy: STS_ISSUER_POLICY,
+};
+
+/// The user of `kind`, if this adapter serves it.
+pub fn served(kind: CredentialKind) -> Option<User> {
+    match kind {
+        CredentialKind::QueryEngine => Some(QUERY_ENGINE),
+        CredentialKind::StsIssuer => Some(STS_ISSUER),
+        _ => None,
+    }
+}
 
 /// The steps, as a failure names them.
 pub const STEP_POLICY: &str = "policy";
@@ -56,18 +91,19 @@ pub fn refused(given: &Credentials, admin: &Credentials) -> Option<&'static str>
     }
 }
 
-/// Makes the query engine's user with `given`, or updates it to them, and
-/// attaches [`POLICY`]: the same calls on every run, each a no-op when it
-/// already holds.
-pub async fn ensure_query_engine(
+/// Makes `user`'s user with `given`, or updates it to them, and attaches
+/// its policy: the same calls on every run, each a no-op when it already
+/// holds.
+pub async fn ensure(
     lake: &Rustfs,
+    user_kind: User,
     admin: &Credentials,
     given: &Credentials,
 ) -> Result<(), Failed> {
     let base = lake.base(&lake.source);
-    let name = [("name", POLICY_NAME)];
+    let name = [("name", user_kind.policy_name)];
     let mut policy = call(&base, "PUT", admin_path("add-canned-policy"), &name);
-    policy.body = POLICY.as_bytes().to_vec();
+    policy.body = user_kind.policy.as_bytes().to_vec();
     passed(STEP_POLICY, lake.send(admin, policy).await)?;
 
     let user_query = [("accessKey", given.access_key.as_str())];
@@ -77,7 +113,7 @@ pub async fn ensure_query_engine(
     passed(STEP_USER, lake.send(admin, user).await)?;
 
     let attach_query = [
-        ("policyName", POLICY_NAME),
+        ("policyName", user_kind.policy_name),
         ("userOrGroup", given.access_key.as_str()),
         ("isGroup", "false"),
     ];
@@ -120,8 +156,17 @@ mod tests {
     }
 
     #[test]
-    fn the_policy_names_the_warehouses_alone() {
-        let policy: serde_json::Value = serde_json::from_str(POLICY).unwrap();
+    fn each_policy_names_the_warehouses_alone() {
+        for user in [QUERY_ENGINE, STS_ISSUER] {
+            warehouses_alone(user.policy);
+        }
+        assert_ne!(QUERY_ENGINE.policy_name, STS_ISSUER.policy_name);
+        assert_eq!(served(CredentialKind::Root), None);
+        assert_eq!(served(CredentialKind::Admin), None);
+    }
+
+    fn warehouses_alone(policy: &str) {
+        let policy: serde_json::Value = serde_json::from_str(policy).unwrap();
         let statements = policy["Statement"].as_array().unwrap();
         assert_eq!(statements.len(), 2);
         for statement in statements {

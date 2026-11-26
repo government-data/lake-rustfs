@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# What RustFS does with a query engine's lake user, as the adapter's
-# `PUT /credentials/query-engine` makes it (core decisions 0078 and 0091):
-# every call signed with the lake's admin user's keys, never root.
+# What RustFS does with the lake users the adapter's `PUT
+# /credentials/{query-engine,sts-issuer}` makes (core decisions 0078 and
+# 0091): every call signed with the lake's admin user's keys, never root.
 #
+# The query engine's user:
 #   (admin)  the admin user (the core's admin policy: s3:* on qd-tenant-*,
 #            admin:*) may add a canned policy, a user and attach the policy;
 #   (again)  the same three calls a second time answer 200 and change
@@ -17,19 +18,24 @@
 #   (outside) refused: an object in a bucket that is not a warehouse,
 #            making a bucket, another bucket's catalog, the admin API
 #            (info, list-users, add-user, add-canned-policy).
+# The STS issuer's user (its policy, made the same way):
+#   (issuer) it writes in a warehouse and is refused another bucket and
+#            the admin API; AssumeRole with a session policy that reads the
+#            warehouse gives credentials that list it and are refused a
+#            write there and another bucket.
 #
-# Throwaway containers only (qd-verify-lakeqe-…, a network of their own, no
+# Throwaway containers only (qd-verify-lakeusers-…, a network of their own, no
 # port published), random keys never printed, synthetic objects only. Run
 # alone (no build at the same time), from the repository root:
 #
-#   bash tools/verify/rustfs_query_engine.sh
+#   bash tools/verify/rustfs_lake_users.sh
 #
 # Needs docker, curl 7.75 or later (--aws-sigv4) and openssl.
 set -u
 export LC_ALL=C
 IMAGE=${RUSTFS_IMAGE:-rustfs/rustfs:1.0.5}
 docker image inspect "$IMAGE" -f 'image: {{index .RepoDigests 0}}' 2>/dev/null || echo "image: $IMAGE"
-P=qd-verify-lakeqe
+P=qd-verify-lakeusers
 WAIT=${QD_VERIFY_WAIT:-60}
 D=$(mktemp -d)
 chmod 700 "$D"
@@ -106,8 +112,9 @@ done
 expect "the warehouse's table bucket" 200 "$(as root GET "/iceberg/v1/config?warehouse=$W")"
 
 # The adapter's query-engine policy (src/credentials.rs), as it sends it.
-POLICY=$(sed -n 's/^pub const POLICY: &str = r#"\(.*\)"#;$/\1/p' crates/lake-rustfs-admin/src/credentials.rs)
-[ -n "$POLICY" ] || { ko "no POLICY in src/credentials.rs"; exit 1; }
+policy_of() { sed -n "s/^pub const $1: \&str = r#\"\(.*\)\"#;\$/\1/p" crates/lake-rustfs-admin/src/credentials.rs; }
+POLICY=$(policy_of QUERY_ENGINE_POLICY)
+[ -n "$POLICY" ] || { ko "no QUERY_ENGINE_POLICY in src/credentials.rs"; exit 1; }
 json qe_policy "$POLICY"
 b64url() { openssl rand -base64 "$1" | tr '+/' '-_' | tr -d '=\n'; }
 QE_ACCESS=$(b64url 16)
@@ -170,6 +177,43 @@ expect "(rotate) the new secret lists the warehouse" 200 "$(as qe GET "/$W?list-
 cfg old "$QE_ACCESS" "$OLD"
 expect "(rotate) the old secret is refused" 403 "$(as old GET "/$W?list-type=2")"
 expect "(rotate) the policy is still attached: another bucket refused" 403 "$(as qe GET '/qd-verify-other?list-type=2')"
+
+# (issuer)
+ISSUER_POLICY=$(policy_of STS_ISSUER_POLICY)
+[ -n "$ISSUER_POLICY" ] || { ko "no STS_ISSUER_POLICY in src/credentials.rs"; exit 1; }
+json issuer_policy "$ISSUER_POLICY"
+IS_ACCESS=$(b64url 16)
+IS_SECRET=$(b64url 32)
+json issuer_user "{\"secretKey\":\"$IS_SECRET\",\"status\":\"enabled\"}"
+for run in first again; do
+  expect "(issuer, $run) add-canned-policy" 200 "$(as admin PUT '/rustfs/admin/v3/add-canned-policy?name=qd-sts-issuer' "$D/issuer_policy.json")"
+  expect "(issuer, $run) add-user" 200 "$(as admin PUT "/rustfs/admin/v3/add-user?accessKey=$IS_ACCESS" "$D/issuer_user.json")"
+  expect "(issuer, $run) set-user-or-group-policy" 200 "$(as admin PUT "/rustfs/admin/v3/set-user-or-group-policy?policyName=qd-sts-issuer&userOrGroup=$IS_ACCESS&isGroup=false")"
+done
+cfg issuer "$IS_ACCESS" "$IS_SECRET"
+expect "(issuer) writes in the warehouse" 200 "$(as issuer PUT "/$W/issuer/obj.txt" "$D/obj")"
+expect "(issuer) another bucket refused" 403 "$(as issuer GET '/qd-verify-other?list-type=2')"
+expect "(issuer) the admin API refused" 403 "$(as issuer GET '/rustfs/admin/v3/list-users')"
+SESSION='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetBucketLocation","s3:ListBucket","s3:GetObject"],"Resource":["arn:aws:s3:::'$W'","arn:aws:s3:::'$W'/*"]}]}'
+printf 'user = "%s:%s"\naws-sigv4 = "aws:amz:us-east-1:sts"\n' "$IS_ACCESS" "$IS_SECRET" >"$D/issuer_sts.cfg"
+chmod 600 "$D/issuer_sts.cfg"
+sts=$(curl -s -o "$D/sts.out" -w '%{http_code}' --max-time 15 -K "$D/issuer_sts.cfg" -X POST \
+  -H 'content-type: application/x-www-form-urlencoded' --data 'Action=AssumeRole&Version=2011-06-15&DurationSeconds=900' \
+  --data-urlencode "Policy=$SESSION" "$URL/")
+tmp_access=$(sed -n 's:.*<AccessKeyId>\([^<]*\)</AccessKeyId>.*:\1:p' "$D/sts.out")
+tmp_secret=$(sed -n 's:.*<SecretAccessKey>\([^<]*\)</SecretAccessKey>.*:\1:p' "$D/sts.out")
+tmp_token=$(sed -n 's:.*<SessionToken>\([^<]*\)</SessionToken>.*:\1:p' "$D/sts.out")
+if [ "$sts" = 200 ] && [ -n "$tmp_access" ]; then
+  ok "(issuer) AssumeRole with a session policy ($sts)"
+  cfg job "$tmp_access" "$tmp_secret"
+  printf 'header = "x-amz-security-token: %s"\n' "$tmp_token" >>"$D/job.cfg"
+  expect "(issuer) the job's credentials list the warehouse" 200 "$(as job GET "/$W?list-type=2")"
+  expect "(issuer) the job's credentials read an object" 200 "$(as job GET "/$W/issuer/obj.txt")"
+  expect "(issuer) narrowed: a write refused" 403 "$(as job PUT "/$W/issuer/job.txt" "$D/obj")"
+  expect "(issuer) narrowed: another bucket refused" 403 "$(as job GET '/qd-verify-other?list-type=2')"
+else
+  ko "(issuer) AssumeRole ($sts): $(sed 's/<SecretAccessKey>[^<]*/<SecretAccessKey>…/; s/<SessionToken>[^<]*/<SessionToken>…/' "$D/sts.out" | head -c 300)"
+fi
 
 echo
 if [ "$FAILED" = 0 ]; then echo "ALL OK"; else echo "SOME CHECKS FAILED"; fi
