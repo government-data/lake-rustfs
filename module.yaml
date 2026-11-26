@@ -2,7 +2,7 @@
 # on RustFS. Its version is the module's one version source: a release tag is
 # `v` + this version, and tools/package.sh refuses any other.
 name: lake-rustfs
-version: 0.2.1
+version: 0.3.0
 
 # The capability `lake` and the protocols it promises. The properties are
 # what a consumer reads from the core, never assumes (core decision 0078,
