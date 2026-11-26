@@ -138,11 +138,15 @@ jobs:
           RUSTFS_SECRET_KEY: not-a-secret
           QD_MACHINE_NAME: lake-1
           QD_MACHINE_DIR: /var/lib/qd-node
-          QD_LAKE_CHECK_URL: https://internal.example.test:9443/api/internal/machines/lake/check
+          QD_LAKE_CHECK_URL: https://lakegate.internal.example.test/api/internal/machines/lake/check
+          QD_CORE_NAME: internal.example.test
+          QD_CORE_ADDR: 10.80.0.10
         run: |
           docker compose --project-name lake-rustfs --file compose.yml config --quiet
           docker compose --project-name lake-rustfs --file compose.yml config --format json \
             | jq -e '.services.rustfs.volumes[0] | .type == "volume" and .source == "rustfs-data" and .target == "/data"'
+          docker compose --project-name lake-rustfs --file compose.yml config --format json \
+            | jq -e '.services.gate.extra_hosts | tostring | test("lakegate.internal.example.test") and test("10.80.0.10")'
           LAKE_DRIVES=4 LAKE_DATA=/srv/lake docker compose --project-name lake-rustfs --file compose.yml config --format json \
             | jq -e '.services.rustfs.volumes[0] | .type == "bind" and .source == "/srv/lake" and .target == "/data"'
       - name: The entrypoints parse
