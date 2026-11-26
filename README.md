@@ -17,8 +17,10 @@ it.
 - `compose.yml`: what an installation runs on the lake's machine, the
   images by digest from the signed index (`IMAGE_RUSTFS`, `IMAGE_GATE`,
   `IMAGE_ADMIN`): RustFS with the machine's certificate, the gate in front
-  of it (published on `RUSTFS_PORT`, 9000) and the adapter (published on
-  `LAKE_ADMIN_PORT`, 9020). One node, with one drive by default or several
+  of it on the machine's one port (`RUSTFS_PORT`, 443) and the adapter
+  behind the gate: under the machine's name the gate serves S3 and the
+  Iceberg catalog, under `admin.<machine name>` it passes the adapter's
+  TLS through by SNI without terminating it. One node, with one drive by default or several
   (`LAKE_DRIVES`, each a disk of its own mounted under `LAKE_DATA` as `1`,
   `2`, …; four advised, since a one-drive node cannot grow in place).
 - `compose/`: the entrypoints `compose.yml` mounts: RustFS's drives and
