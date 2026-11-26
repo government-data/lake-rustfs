@@ -16,10 +16,10 @@ repository = "https://github.com/government-data/lake-rustfs"
 # `module-testkit`. The pin moves only in a pull request of its own.
 # `contracts` (the lake-admin/1 wire types) and `sigv4` at run time;
 # `lake-contract` (the contract suite) and `testkit` (a test CA) in tests.
-contracts = { git = "https://github.com/government-data/core", rev = "025d93fb38a99fcc6c66aae043374d8bf0f57630" }
-sigv4 = { git = "https://github.com/government-data/core", rev = "025d93fb38a99fcc6c66aae043374d8bf0f57630" }
-lake-contract = { git = "https://github.com/government-data/core", rev = "025d93fb38a99fcc6c66aae043374d8bf0f57630" }
-testkit = { git = "https://github.com/government-data/core", rev = "025d93fb38a99fcc6c66aae043374d8bf0f57630" }
+contracts = { git = "https://github.com/government-data/core", rev = "015d410591042187bd3f2874ddf7be818aae2779" }
+sigv4 = { git = "https://github.com/government-data/core", rev = "015d410591042187bd3f2874ddf7be818aae2779" }
+lake-contract = { git = "https://github.com/government-data/core", rev = "015d410591042187bd3f2874ddf7be818aae2779" }
+testkit = { git = "https://github.com/government-data/core", rev = "015d410591042187bd3f2874ddf7be818aae2779" }
 # The module's manifest model, to check module.yaml in tests.
 module-manifest = { git = "https://github.com/government-data/quality-sdk", rev = "aedbd996a1e6e02d87a87c151b6f54ed12c5f8ef" }
 
