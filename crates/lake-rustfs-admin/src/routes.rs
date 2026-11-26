@@ -1,7 +1,7 @@
 //! `lake-admin/1`'s routes (decision 0078): the caller check, `GET /about`,
 //! `GET /health`, `PUT /warehouses/{name}`, its replication (`PUT`, and
 //! `GET` with what waits and what failed), `POST
-//! /policies/session`, `PUT /credentials/query-engine` and the error
+//! /policies/session`, `PUT /credentials/{query-engine,sts-issuer}` and the error
 //! shape. The keys an operation needs come in its headers
 //! (`contracts::lake_admin::headers`), held for that call alone and never
 //! logged. The other operations (the managed policies, the other kinds of
@@ -175,7 +175,7 @@ async fn session_policy(body: Bytes) -> Result<Json<wire::SessionPolicy>, Error>
 
 /// A lake user of `kind` made with the keys given (`held`), or updated to
 /// them, and those keys answered; never new ones. Served for
-/// `query-engine`; another kind is `404 unknown`. The admin keys come in
+/// `query-engine` and `sts-issuer`; another kind is `404 unknown`. The admin keys come in
 /// their header, or as `with` when it is absent. No body is logged.
 async fn ensure_credentials(
     State(lake): State<Arc<Rustfs>>,
@@ -184,11 +184,11 @@ async fn ensure_credentials(
     bytes: Bytes,
 ) -> Result<Json<Credentials>, Error> {
     let what = format!("PUT credentials/{kind}");
-    let served = serde_json::from_value(serde_json::Value::String(kind.clone()));
-    if !matches!(served, Ok(CredentialKind::QueryEngine)) {
+    let served = serde_json::from_value::<CredentialKind>(serde_json::Value::String(kind.clone()));
+    let Some(user) = served.ok().and_then(credentials::served) else {
         let message = format!("{what}: not a kind of credentials this lake serves");
         return Err(Error::new(ErrorCode::Unknown, message));
-    }
+    };
     let request: CredentialsRequest = body(&bytes, &what)?;
     let admin = match keys(&map, headers::ADMIN_KEYS, &what)? {
         Some(admin) => admin,
@@ -204,7 +204,7 @@ async fn ensure_credentials(
     if let Some(why) = credentials::refused(&given, &admin) {
         return Err(Error::new(ErrorCode::Invalid, format!("{what}: {why}")));
     }
-    let made = credentials::ensure_query_engine(&lake, &admin, &given).await;
+    let made = credentials::ensure(&lake, user, &admin, &given).await;
     made.map_err(|failed| {
         let message = format!("{what}: {}: {}", failed.step, failed.detail);
         Error::new(ErrorCode::Lake, message)
