@@ -2,7 +2,7 @@
 # on RustFS. Its version is the module's one version source: a release tag is
 # `v` + this version, and tools/package.sh refuses any other.
 name: lake-rustfs
-version: 0.3.0
+version: 0.4.0
 
 # The capability `lake` and the protocols it promises. The properties are
 # what a consumer reads from the core, never assumes (core decision 0078,
@@ -20,7 +20,9 @@ provides:
         url-style: path
         catalog-sigv4-service: s3
         sts-min-duration-secs: 900
-        lake-admin-port: 9020
+        # The machine's one port: S3 and the catalog under its name, the
+        # admin adapter under admin.<its name> (decision 0091, ruling 72).
+        lake-admin-port: 443
 
 # The console's route, its sign-in and its menu entry stay in the core's
 # apps.yml for now: the console runs on the lake's machines behind the gate,

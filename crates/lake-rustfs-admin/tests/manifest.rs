@@ -58,3 +58,10 @@ fn the_lake_and_its_replica_each_run_rustfs_its_gate_and_the_adapter() {
         assert_eq!(r.strategy, Strategy::All, "{}", r.name);
     }
 }
+
+#[test]
+fn the_adapter_is_on_the_machines_one_port() {
+    let m = manifest();
+    let props = &m.provides.capabilities[0].properties;
+    assert_eq!(props["lake-admin-port"], 443);
+}

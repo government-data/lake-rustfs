@@ -4,14 +4,22 @@
 #
 #   tools/verify/compose.sh
 #
-# Runs `rustfs` and `gate` from this checkout's compose.yml (the adapter
-# needs its released image: IMAGE_ADMIN, optional) as the project
-# qs-verify-lake, with a throwaway CA and machine certificate, and a fake
-# core lake check (traefik/whoami over TLS). For one drive (the volume
+# Runs `rustfs`, `gate` and `admin` from this checkout's compose.yml as the
+# project qs-verify-lake, with a throwaway CA and machine certificate (its
+# name and admin.<its name>), a fake core lake check (traefik/whoami over
+# TLS) and, in place of the adapter's image, a stand-in that does mTLS
+# itself with a certificate of its own (traefik/whoami with -cacert; a
+# compose override). Everything goes through the gate's one published port
+# (RUSTFS_PORT, mapped here to a free high port). For one drive (the volume
 # rustfs-data) and for four (four tmpfs mounted under LAKE_DATA by a
 # privileged helper, each a device of its own):
-#   - an object written and read back through the gate with a machine
-#     certificate; refused without one, and refused when the check says no;
+#   - S3 under the machine's name: an object written and read back through
+#     the gate with a machine certificate; refused without one, and refused
+#     when the check says no;
+#   - the adapter under admin.<name> on the same port: answered by the
+#     stand-in, whose own certificate is the one presented (the gate does
+#     not terminate it), refused by the stand-in without a client
+#     certificate, and still answered when the core's check says no;
 #   - the agent's backup of /data (`docker compose cp rustfs:/data -`), the
 #     volume emptied as its restore does (busybox find -delete through
 #     --volumes-from) and copied back: the object reads back.
@@ -23,16 +31,18 @@ P=qs-verify-lake
 W="$(mktemp -d)"
 export IMAGE_RUSTFS="${IMAGE_RUSTFS:-rustfs/rustfs:1.0.5}"
 export IMAGE_GATE="${IMAGE_GATE:-traefik:v3.6}"
-export IMAGE_ADMIN="${IMAGE_ADMIN:-none}"
+export IMAGE_ADMIN=traefik/whoami:v1.11
 HELPER=alpine:3.20
 RUSTFS_ACCESS_KEY="qsverify$(openssl rand -hex 6)" RUSTFS_SECRET_KEY="$(openssl rand -hex 20)"
 export RUSTFS_ACCESS_KEY RUSTFS_SECRET_KEY
 export QD_MACHINE_NAME=qs-verify-lake-1 QD_MACHINE_DIR="$W/machine"
 export QD_LAKE_CHECK_URL=https://qs-verify-check/health
-export RUSTFS_BIND=127.0.0.1 RUSTFS_PORT=19000 LAKE_ADMIN_BIND=127.0.0.1 LAKE_ADMIN_PORT=19020
+export RUSTFS_BIND=127.0.0.1 RUSTFS_PORT=19100
+ADMIN_NAME="admin.$QD_MACHINE_NAME"
 failed=0
 
-dc() { docker compose --project-name "$P" --project-directory "$root" --file "$root/compose.yml" "$@"; }
+dc() { docker compose --project-name "$P" --project-directory "$root" --file "$root/compose.yml" \
+  --file "$W/stand-in.yml" "$@"; }
 ok() { echo "PASS $*"; }
 bad() { echo "FAIL $*"; failed=1; }
 # The drives' mounts outlive their helper: unmounted from a peer of them.
@@ -54,21 +64,33 @@ trap cleanup EXIT
 
 # A CA, the lake machine's certificate (machine.pem: certificate then key),
 # the fake core's and a client's; readable by the containers' uid 10001.
-mkdir -p "$W/machine" "$W/check" "$W/client"
-cert() { # name dir
+mkdir -p "$W/machine" "$W/check" "$W/client" "$W/admin"
+cert() { # name dir [alt names, comma-separated DNS:…]
   openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$2/key.pem" \
     -subj "/CN=$1" -out "$2/req.csr" 2>/dev/null
-  printf 'subjectAltName=DNS:%s\nextendedKeyUsage=serverAuth,clientAuth\n' "$1" >"$2/ext"
+  printf 'subjectAltName=%s\nextendedKeyUsage=serverAuth,clientAuth\n' "${3:-DNS:$1}" >"$2/ext"
   openssl x509 -req -in "$2/req.csr" -CA "$W/ca.crt" -CAkey "$W/ca.key" -CAcreateserial \
     -days 1 -extfile "$2/ext" -out "$2/cert.pem" 2>/dev/null
 }
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$W/ca.key" \
   -subj "/CN=qs-verify CA" -days 1 -out "$W/ca.crt" 2>/dev/null
-cert "$QD_MACHINE_NAME" "$W/machine"
+cert "$QD_MACHINE_NAME" "$W/machine" "DNS:$QD_MACHINE_NAME,DNS:$ADMIN_NAME"
 cat "$W/machine/cert.pem" "$W/machine/key.pem" >"$W/machine/machine.pem"
 cp "$W/ca.crt" "$W/machine/ca.crt"
 cert qs-verify-check "$W/check"
 cert qs-verify-client "$W/client"
+# The stand-in's own certificate, for admin.<name> but not the machine's:
+# the one a client sees only if the gate passes the TLS through.
+cert qs-verify-admin-stand-in "$W/admin" "DNS:$ADMIN_NAME"
+cp "$W/ca.crt" "$W/admin/ca.crt"
+# The adapter's service as compose.yml has it, its image a stand-in.
+cat >"$W/stand-in.yml" <<YML
+services:
+  admin:
+    command: ["--port", "9020", "--cert", "/s/cert.pem", "--key", "/s/key.pem", "--cacert", "/s/ca.crt"]
+    volumes:
+      - $W/admin:/s:ro
+YML
 chmod -R a+rX "$W"
 
 # One case: up, an object through the gate, the refusals, backup and restore.
@@ -78,8 +100,8 @@ run_case() { # label
   local s3=("${tls[@]}" --cert "$W/client/cert.pem" --key "$W/client/key.pem"
     --aws-sigv4 aws:amz:us-east-1:s3 --user "$RUSTFS_ACCESS_KEY:$RUSTFS_SECRET_KEY")
   url="https://$QD_MACHINE_NAME:$RUSTFS_PORT"
-  if ! dc up -d --wait --wait-timeout 180 rustfs gate >/dev/null 2>&1; then
-    bad "$label: rustfs and gate up"; dc logs rustfs gate | tail -20; return
+  if ! dc up -d --wait --wait-timeout 180 rustfs gate admin >/dev/null 2>&1; then
+    bad "$label: rustfs, gate and admin up"; dc logs rustfs gate admin | tail -20; return
   fi
   docker network connect --alias qs-verify-check "${P}_edge" qs-verify-check
   sleep 3
@@ -91,10 +113,12 @@ run_case() { # label
   if curl "${tls[@]}" -fsS "$url/health/ready" -o /dev/null 2>/dev/null; then
     bad "$label: the gate let in a client with no certificate"
   else ok "$label: no client certificate, refused"; fi
+  admin_route "$label" 200
   check 403
   if [ "$(curl "${s3[@]}" -sS -o /dev/null -w '%{http_code}' "$url/qs-verify/object")" = 403 ]; then
     ok "$label: the core's check says no, refused"
   else bad "$label: the gate did not follow the core's check"; fi
+  admin_route "$label" 403
   check 200
   dc cp rustfs:/data - >"$W/backup.tar"
   dc stop rustfs >/dev/null 2>&1
@@ -110,6 +134,30 @@ run_case() { # label
   rm -f -- "$W/backup.tar"
   docker network disconnect "${P}_edge" qs-verify-check
   dc down -v >/dev/null 2>&1
+}
+
+# admin.<name> on the gate's one port: the stand-in's own certificate is
+# the one presented (the gate passed the TLS through), it answers a client
+# certificate and refuses none itself. With the check answering $2, which
+# the adapter's route does not ask.
+admin_route() { # label check
+  local label="$1" at="https://$ADMIN_NAME:$RUSTFS_PORT/"
+  local tls=(--cacert "$W/ca.crt" --resolve "$ADMIN_NAME:$RUSTFS_PORT:127.0.0.1")
+  local subject
+  subject=$(openssl s_client -connect "127.0.0.1:$RUSTFS_PORT" -servername "$ADMIN_NAME" \
+    -cert "$W/client/cert.pem" -key "$W/client/key.pem" </dev/null 2>/dev/null |
+    openssl x509 -noout -subject 2>/dev/null)
+  case "$subject" in
+  *qs-verify-admin-stand-in*) ok "$label: admin.<name> passed through to the adapter, not terminated" ;;
+  *) bad "$label: admin.<name> was answered by '$subject', not the adapter" ;;
+  esac
+  if curl "${tls[@]}" --cert "$W/client/cert.pem" --key "$W/client/key.pem" -fsS "$at" |
+    grep -q '^Hostname:'; then
+    ok "$label: the adapter answers a client certificate (check $2)"
+  else bad "$label: the adapter through the gate (check $2)"; fi
+  if curl "${tls[@]}" -fsS "$at" -o /dev/null 2>/dev/null; then
+    bad "$label: the adapter's route let in a client with no certificate"
+  else ok "$label: the adapter's route, no client certificate, refused"; fi
 }
 
 # What the fake core's lake check answers from now on.

@@ -24,15 +24,19 @@
 #   `rustfs-data`, or several, each a disk of its own mounted under
 #   LAKE_DATA as 1, 2, …, so that the node can later take a pool beside it.
 #   A one-drive node never grows in place.
-# - `gate`, the one way in to RustFS (compose/lake-gate.sh): S3, STS, the
-#   Iceberg REST catalog and the console under /rustfs/console, published
-#   on RUSTFS_PORT. It requires a client certificate of the installation's
-#   CA and asks the core before each request whether that machine may pass
-#   (QD_LAKE_CHECK_URL); with the core down nothing passes.
+# - `gate`, the machine's one way in, on its one published port, RUSTFS_PORT
+#   (443; decision 0091, rulings 71 and 72; compose/lake-gate.sh). Under
+#   the machine's name: S3, STS, the Iceberg REST catalog and the console
+#   under /rustfs/console; it requires a client certificate of the
+#   installation's CA and asks the core before each request whether that
+#   machine may pass (QD_LAKE_CHECK_URL); with the core down nothing passes.
+#   Under `admin.<machine name>` (by SNI): the adapter, passed through as
+#   TCP and never terminated, so the adapter's own mTLS sees the caller.
 # - `admin`, the lake admin adapter: lake-admin/1 to the core's server alone,
-#   with mTLS of the installation's CA both ways, published on
-#   LAKE_ADMIN_PORT. It reaches RustFS through the gate, under the machine's
-#   name, and keeps no data or secret.
+#   with mTLS of the installation's CA both ways, reached only through the
+#   gate as `admin.<machine name>`; it publishes no port. It reaches RustFS
+#   through the gate, under the machine's name, and keeps no data or
+#   secret.
 #
 # The three run as the node agent's user (uid 10001) and read its files as
 # they are (QD_MACHINE_DIR: ca.crt, machine.pem).
@@ -51,8 +55,7 @@
 #                       each drive's disk is mounted, as 1 to LAKE_DRIVES,
 #                       owned by uid 10001 (default: the volume rustfs-data,
 #                       for one drive)
-#   RUSTFS_BIND (0.0.0.0), RUSTFS_PORT (9000)          the gate
-#   LAKE_ADMIN_BIND (0.0.0.0), LAKE_ADMIN_PORT (9020)  the adapter
+#   RUSTFS_BIND (0.0.0.0), RUSTFS_PORT (443)  the gate, the one port
 #   RUSTFS_MTLS (0), RUSTFS_LOG_LEVEL (warn), LAKE_ADMIN_LOG (info),
 #   QD_GATE_CHECK_EVERY (30), QD_RUSTFS_TLS_CHECK_EVERY (30), and the
 #   object data cache's RUSTFS_OBJECT_DATA_CACHE_* (core decision 0028).
@@ -62,7 +65,7 @@ networks:
   # RustFS, its gate and its adapter alone.
   lake:
     internal: true
-  # The published ports of the gate and the adapter.
+  # The gate's published port, and its way out to the core's check.
   edge: {}
 
 volumes:
@@ -124,7 +127,7 @@ services:
       - ./compose/lake-gate.sh:/etc/qd/gate/entrypoint.sh:ro
       - ${QD_MACHINE_DIR:?set QD_MACHINE_DIR to the node agent's directory}:/run/qd-node:ro
     ports:
-      - "${RUSTFS_BIND:-0.0.0.0}:${RUSTFS_PORT:-9000}:9000"
+      - "${RUSTFS_BIND:-0.0.0.0}:${RUSTFS_PORT:-443}:9000"
     networks:
       # On the lake's network also under the machine's name, as its
       # certificate says: the adapter reaches RustFS at https://<name>:9000.
@@ -152,9 +155,8 @@ services:
       RUST_LOG: ${LAKE_ADMIN_LOG:-info}
     volumes:
       - ${QD_MACHINE_DIR:?set QD_MACHINE_DIR to the node agent's directory}:/run/qd-node:ro
-    ports:
-      - "${LAKE_ADMIN_BIND:-0.0.0.0}:${LAKE_ADMIN_PORT:-9020}:9020"
-    networks: [lake, edge]
+    # Reached by the gate alone, as admin.<machine name> (SNI passthrough).
+    networks: [lake]
     depends_on:
       gate:
         condition: service_started

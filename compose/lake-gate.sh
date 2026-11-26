@@ -13,6 +13,11 @@
 #     of the gates), presenting the same machine certificate, with the
 #     machine at the door named in X-Forwarded-Tls-Client-Cert-Info
 #     (subject and serial), which Traefik writes over whatever came;
+#   - one exception, by host name (SNI): `admin.<QD_MACHINE_NAME>` is
+#     passed through as TCP, never terminated, to the lake admin adapter
+#     (QD_GATE_ADMIN_UPSTREAM), which does its own mTLS with the caller's
+#     certificate and checks its role (decision 0091, rulings 71 and 72);
+#     the machine's certificate carries that name;
 #   - then RustFS, over TLS verified against the CA under the node's name
 #     (QD_MACHINE_NAME, its certificate's), presenting the same machine
 #     certificate, which a pool node's RustFS requires of every client
@@ -35,6 +40,7 @@ WAIT=${QD_GATE_WAIT:-300}
 : "${QD_LAKE_CHECK_URL:?set QD_LAKE_CHECK_URL to the API's lake check on the gates' entry point}"
 : "${QD_MACHINE_NAME:?set QD_MACHINE_NAME to the lake node's name, its certificate's}"
 UPSTREAM=${QD_GATE_UPSTREAM:-https://rustfs:9000}
+ADMIN=${QD_GATE_ADMIN_UPSTREAM:-admin:9020}
 CONSOLE=${QD_GATE_CONSOLE_UPSTREAM:-https://rustfs:9001}
 
 log() { echo "lake-gate: $*" >&2; }
@@ -45,6 +51,19 @@ fingerprint() { cat "$SRC/ca.crt" "$SRC/machine.pem" 2>/dev/null | sha256sum | c
 # The dynamic file, aside then renamed.
 write() {
   cat >"$DYN/.gate.yml.new" <<YML
+tcp:
+  routers:
+    admin:
+      entryPoints: [lake]
+      rule: "HostSNI(\`admin.$QD_MACHINE_NAME\`)"
+      tls:
+        passthrough: true
+      service: admin
+  services:
+    admin:
+      loadBalancer:
+        servers:
+          - address: "$ADMIN"
 http:
   routers:
     lake:
