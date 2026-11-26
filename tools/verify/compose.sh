@@ -7,9 +7,10 @@
 # Runs `rustfs`, `gate` and `admin` from this checkout's compose.yml as the
 # project qs-verify-lake, with a throwaway CA and machine certificate (its
 # name and admin.<its name>), a fake core lake check (traefik/whoami over
-# TLS) and, in place of the adapter's image, a stand-in that does mTLS
-# itself with a certificate of its own (traefik/whoami with -cacert; a
-# compose override). Everything goes through the gate's one published port
+# TLS, reached as lakegate.<core name> through the gate's extra_hosts)
+# and, in place of the adapter's image, a stand-in that does mTLS itself
+# with a certificate of its own (traefik/whoami with -cacert; a compose
+# override). Everything goes through the gate's one published port
 # (RUSTFS_PORT, mapped here to a free high port). For one drive (the volume
 # rustfs-data) and for four (four tmpfs mounted under LAKE_DATA by a
 # privileged helper, each a device of its own):
@@ -36,7 +37,13 @@ HELPER=alpine:3.20
 RUSTFS_ACCESS_KEY="qsverify$(openssl rand -hex 6)" RUSTFS_SECRET_KEY="$(openssl rand -hex 20)"
 export RUSTFS_ACCESS_KEY RUSTFS_SECRET_KEY
 export QD_MACHINE_NAME=qs-verify-lake-1 QD_MACHINE_DIR="$W/machine"
-export QD_LAKE_CHECK_URL=https://qs-verify-check/health
+# The fake core: the master's names resolved by the gate's extra_hosts to
+# Docker's bridge gateway, where the check is published (never port 443).
+export QD_CORE_NAME=qs-verify-core
+QD_CORE_ADDR="$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}')"
+export QD_CORE_ADDR
+CHECK="lakegate.$QD_CORE_NAME"
+export QD_LAKE_CHECK_URL="https://$CHECK:19443/health"
 export RUSTFS_BIND=127.0.0.1 RUSTFS_PORT=19100
 ADMIN_NAME="admin.$QD_MACHINE_NAME"
 failed=0
@@ -77,7 +84,7 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$W
 cert "$QD_MACHINE_NAME" "$W/machine" "DNS:$QD_MACHINE_NAME,DNS:$ADMIN_NAME"
 cat "$W/machine/cert.pem" "$W/machine/key.pem" >"$W/machine/machine.pem"
 cp "$W/ca.crt" "$W/machine/ca.crt"
-cert qs-verify-check "$W/check"
+cert "$CHECK" "$W/check"
 cert qs-verify-client "$W/client"
 # The stand-in's own certificate, for admin.<name> but not the machine's:
 # the one a client sees only if the gate passes the TLS through.
@@ -103,7 +110,6 @@ run_case() { # label
   if ! dc up -d --wait --wait-timeout 180 rustfs gate admin >/dev/null 2>&1; then
     bad "$label: rustfs, gate and admin up"; dc logs rustfs gate admin | tail -20; return
   fi
-  docker network connect --alias qs-verify-check "${P}_edge" qs-verify-check
   sleep 3
   if curl "${s3[@]}" -fsS -X PUT "$url/qs-verify" -o /dev/null &&
     curl "${s3[@]}" -fsS -X PUT --data-binary "$body" "$url/qs-verify/object" -o /dev/null &&
@@ -132,7 +138,6 @@ run_case() { # label
   if [ "$i" -lt 30 ]; then ok "$label: /data backed up, emptied, restored: the object reads back"
   else bad "$label: the object after a restore of /data"; fi
   rm -f -- "$W/backup.tar"
-  docker network disconnect "${P}_edge" qs-verify-check
   dc down -v >/dev/null 2>&1
 }
 
@@ -162,11 +167,11 @@ admin_route() { # label check
 
 # What the fake core's lake check answers from now on.
 check() {
-  curl --cacert "$W/ca.crt" --resolve qs-verify-check:19443:127.0.0.1 -fsS -X POST -d "$1" \
-    https://qs-verify-check:19443/health -o /dev/null
+  curl --cacert "$W/ca.crt" --resolve "$CHECK:19443:$QD_CORE_ADDR" -fsS -X POST -d "$1" \
+    "$QD_LAKE_CHECK_URL" -o /dev/null
 }
 
-docker run -d --name qs-verify-check -p 127.0.0.1:19443:443 -v "$W/check:/c:ro" traefik/whoami:v1.11 \
+docker run -d --name qs-verify-check -p "$QD_CORE_ADDR:19443:443" -v "$W/check:/c:ro" traefik/whoami:v1.11 \
   --port 443 --cert /c/cert.pem --key /c/key.pem >/dev/null
 
 # One drive, in the volume rustfs-data.

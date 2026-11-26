@@ -46,8 +46,13 @@
 #                                         the installer
 #   QD_MACHINE_NAME     the lake machine's name, as in its certificate
 #   QD_MACHINE_DIR      the node agent's directory (ca.crt, machine.pem)
-#   QD_LAKE_CHECK_URL   the core's lake check, https://<internal domain>:
-#                       <port>/api/internal/machines/lake/check
+#   QD_LAKE_CHECK_URL   the core's lake check, https://lakegate.<internal
+#                       domain>/api/internal/machines/lake/check (on the
+#                       master's 443, by its own name; core decision 0091)
+#   QD_CORE_NAME        the master's machine name (the internal domain)
+#   QD_CORE_ADDR        the master's address: the gate resolves QD_CORE_NAME
+#                       and lakegate.QD_CORE_NAME to it, since Docker's DNS
+#                       does not read the host's /etc/hosts
 # Optional:
 #   LAKE_DRIVES (1)     how many drives; never changed once the lake holds
 #                       data
@@ -121,6 +126,11 @@ services:
       QD_GATE_CHECK_EVERY: ${QD_GATE_CHECK_EVERY:-30}
       # An upload takes what it takes.
       QD_GATE_READ_TIMEOUT: 0s
+    # The master, as the host names it: the gate asks its lake check there.
+    # RustFS and the adapter call nothing on the master.
+    extra_hosts:
+      - "${QD_CORE_NAME:?set QD_CORE_NAME to the master's machine name}:${QD_CORE_ADDR:?set QD_CORE_ADDR to the master's address}"
+      - "lakegate.${QD_CORE_NAME:?set QD_CORE_NAME to the master's machine name}:${QD_CORE_ADDR:?set QD_CORE_ADDR to the master's address}"
     tmpfs:
       - /run/qd-gate:uid=10001,gid=10001,mode=0700
     volumes:
