@@ -1,11 +1,11 @@
 //! `lake-admin/1`'s routes (decision 0078): the caller check, `GET /about`,
 //! `GET /health`, `PUT /warehouses/{name}`, its replication (`PUT`, and
 //! `GET` with what waits and what failed), `POST
-//! /policies/session` and the error shape. The keys an operation needs
-//! come in its headers (`contracts::lake_admin::headers`), held for that
-//! call alone and never logged. The other operations (the managed
-//! policies, the credentials and the pools) answer
-//! `404 unknown` until their steps.
+//! /policies/session`, `PUT /credentials/query-engine` and the error
+//! shape. The keys an operation needs come in its headers
+//! (`contracts::lake_admin::headers`), held for that call alone and never
+//! logged. The other operations (the managed policies, the other kinds of
+//! credentials and the pools) answer `404 unknown` until their steps.
 
 use std::sync::Arc;
 
@@ -17,12 +17,14 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use contracts::lake_admin::{self as wire, headers, Credentials, ErrorBody, ErrorCode};
+use contracts::lake_admin::{
+    self as wire, headers, CredentialKind, Credentials, CredentialsRequest, ErrorBody, ErrorCode,
+};
 use contracts::LakeGrant;
 
 use crate::rustfs::Rustfs;
 use crate::tls::Peer;
-use crate::{health, policy, replication, warehouse};
+use crate::{credentials, health, policy, replication, warehouse};
 
 /// The only role whose certificate is answered: the core server's (0066).
 pub const CALLER_ROLE: &str = "app";
@@ -44,6 +46,10 @@ pub fn router(lake: Arc<Rustfs>) -> Router {
             put(replicate).get(replication).fallback(unserved),
         )
         .route(&wire::paths::session_policy(), post(session_policy))
+        .route(
+            &format!("{}/credentials/{{kind}}", wire::BASE),
+            put(ensure_credentials).fallback(unserved),
+        )
         .fallback(unserved)
         .layer(middleware::from_fn(caller_check))
         .with_state(lake)
@@ -165,6 +171,45 @@ async fn session_policy(body: Bytes) -> Result<Json<wire::SessionPolicy>, Error>
         Error::new(ErrorCode::Invalid, message)
     })?;
     Ok(Json(wire::SessionPolicy { policy }))
+}
+
+/// A lake user of `kind` made with the keys given (`held`), or updated to
+/// them, and those keys answered; never new ones. Served for
+/// `query-engine`; another kind is `404 unknown`. The admin keys come in
+/// their header, or as `with` when it is absent. No body is logged.
+async fn ensure_credentials(
+    State(lake): State<Arc<Rustfs>>,
+    Path(kind): Path<String>,
+    map: HeaderMap,
+    bytes: Bytes,
+) -> Result<Json<Credentials>, Error> {
+    let what = format!("PUT credentials/{kind}");
+    let served = serde_json::from_value(serde_json::Value::String(kind.clone()));
+    if !matches!(served, Ok(CredentialKind::QueryEngine)) {
+        let message = format!("{what}: not a kind of credentials this lake serves");
+        return Err(Error::new(ErrorCode::Unknown, message));
+    }
+    let request: CredentialsRequest = body(&bytes, &what)?;
+    let admin = match keys(&map, headers::ADMIN_KEYS, &what)? {
+        Some(admin) => admin,
+        None => request.with.clone().ok_or_else(|| {
+            let message = format!("{what}: no {} and no `with`", headers::ADMIN_KEYS);
+            Error::new(ErrorCode::Invalid, message)
+        })?,
+    };
+    let given = request.held.ok_or_else(|| {
+        let message = format!("{what}: its keys are given, and `held` did not come");
+        Error::new(ErrorCode::Invalid, message)
+    })?;
+    if let Some(why) = credentials::refused(&given, &admin) {
+        return Err(Error::new(ErrorCode::Invalid, format!("{what}: {why}")));
+    }
+    let made = credentials::ensure_query_engine(&lake, &admin, &given).await;
+    made.map_err(|failed| {
+        let message = format!("{what}: {}: {}", failed.step, failed.detail);
+        Error::new(ErrorCode::Lake, message)
+    })?;
+    Ok(Json(given))
 }
 
 async fn unserved(method: Method, request: Request<Body>) -> Error {

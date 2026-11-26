@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use tokio::net::TcpListener;
 
+pub mod credentials;
 pub mod health;
 pub mod policy;
 pub mod replication;

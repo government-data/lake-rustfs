@@ -384,3 +384,133 @@ async fn the_sync_read_says_what_waits_and_what_failed_in_the_hour() {
     );
     assert_eq!(lines(&seen).len(), 5);
 }
+
+const GIVEN_ACCESS: &str = "Ab-_0123456789abcdefgh";
+const GIVEN_SECRET: &str = "the-secret-the-agent-generated-for-the-engine";
+
+fn given() -> Credentials {
+    Credentials {
+        access_key: GIVEN_ACCESS.into(),
+        secret_key: GIVEN_SECRET.into(),
+    }
+}
+
+#[tokio::test]
+async fn a_query_engines_user_is_its_policy_its_user_and_the_two_attached() {
+    use lake_rustfs_admin::credentials::{self, POLICY, POLICY_NAME};
+    let (port, seen) = gate(vec![OK, OK, OK]);
+    let (lake, admin) = (lake(port), keys(SOURCE_SECRET));
+    let made = credentials::ensure_query_engine(&lake, &admin, &given()).await;
+    assert_eq!(made, Ok(()));
+    let seen = seen.lock().unwrap().clone();
+    let lines: Vec<&str> = seen.iter().map(|s| s.line.as_str()).collect();
+    let access = GIVEN_ACCESS.to_ascii_lowercase();
+    assert_eq!(
+        lines,
+        [
+            format!("put /rustfs/admin/v3/add-canned-policy?name={POLICY_NAME} http/1.1"),
+            format!("put /rustfs/admin/v3/add-user?accesskey={access} http/1.1"),
+            format!(
+                "put /rustfs/admin/v3/set-user-or-group-policy?isgroup=false&policyname={POLICY_NAME}&userorgroup={access} http/1.1"
+            ),
+        ]
+    );
+    assert_eq!(seen[0].body, POLICY);
+    let user: serde_json::Value = serde_json::from_str(&seen[1].body).unwrap();
+    let body = serde_json::json!({"secretKey": GIVEN_SECRET, "status": "enabled"});
+    assert_eq!(user, body);
+    for s in &seen {
+        assert!(s
+            .head
+            .contains("authorization: aws4-hmac-sha256 credential=qd-platform-admin/"));
+        assert!(!s.head.contains(SOURCE_SECRET) && !s.head.contains(GIVEN_SECRET));
+    }
+}
+
+#[tokio::test]
+async fn a_refused_step_of_the_user_says_which_and_stops() {
+    use lake_rustfs_admin::credentials::{self, Failed};
+    let refusal = "<Error><Code>AccessDenied</Code><Message>m</Message></Error>";
+    let (port, seen) = gate(vec![OK, ("403 Forbidden", refusal)]);
+    let (lake, admin) = (lake(port), keys(SOURCE_SECRET));
+    let made = credentials::ensure_query_engine(&lake, &admin, &given()).await;
+    let failed = Failed {
+        step: "user",
+        detail: "HTTP 403 AccessDenied".into(),
+    };
+    assert_eq!(made, Err(failed));
+    assert_eq!(lines(&seen).len(), 2, "the policy is not attached");
+}
+
+#[tokio::test]
+async fn put_credentials_query_engine_takes_the_given_keys_and_answers_them_twice() {
+    use contracts::lake_admin::{headers, paths, CredentialKind};
+    let (port, seen) = gate(vec![OK, OK, OK, OK, OK, OK, OK, OK, OK]);
+    let core = served(port).await;
+    let path = paths::credentials(CredentialKind::QueryEngine);
+    let admin = [(headers::ADMIN_KEYS, headers::encode(&keys(SOURCE_SECRET)))];
+    let held = serde_json::json!({"held": given()});
+    let first = core.call_with("PUT", &path, Some(&held), &admin).await;
+    assert_eq!(first, (200, serde_json::to_value(given()).unwrap()));
+    let again = core.call_with("PUT", &path, Some(&held), &admin).await;
+    assert_eq!(again, first, "the same keys, the same answer");
+    assert_eq!(lines(&seen).len(), 6, "the same three calls each time");
+
+    // The admin keys as `with`, when the header is absent.
+    let with = serde_json::json!({"held": given(), "with": keys(SOURCE_SECRET)});
+    let third = core.call_with("PUT", &path, Some(&with), &[]).await;
+    assert_eq!(third, first);
+    let seen = seen.lock().unwrap();
+    assert!(seen[6..]
+        .iter()
+        .all(|s| s.head.contains("credential=qd-platform-admin/")));
+}
+
+#[tokio::test]
+async fn put_credentials_refuses_another_kind_and_a_request_it_cannot_serve() {
+    use contracts::lake_admin::{headers, paths, CredentialKind};
+    let refusal = "<Error><Code>AccessDenied</Code><Message>m</Message></Error>";
+    let (port, seen) = gate(vec![("403 Forbidden", refusal)]);
+    let core = served(port).await;
+    let admin = [(headers::ADMIN_KEYS, headers::encode(&keys(SOURCE_SECRET)))];
+    let held = serde_json::json!({"held": given()});
+    for kind in ["bogus", "root", "admin", "sts-issuer"] {
+        let path = format!("{}/credentials/{kind}", contracts::lake_admin::BASE);
+        let (status, body) = core.call_with("PUT", &path, Some(&held), &admin).await;
+        assert_eq!(
+            (status, body["code"].clone()),
+            (404, "unknown".into()),
+            "{kind}"
+        );
+        assert!(body["error"].as_str().unwrap().contains(kind), "{body}");
+    }
+    let path = paths::credentials(CredentialKind::QueryEngine);
+    let (status, body) = core.call_with("GET", &path, None, &admin).await;
+    assert_eq!((status, body["code"].clone()), (404, "unknown".into()));
+    let invalid = [
+        (serde_json::json!({}), admin.to_vec()),
+        (held.clone(), Vec::new()),
+        (serde_json::json!({"held": keys("x")}), admin.to_vec()),
+        (serde_json::json!({"held": "keys"}), admin.to_vec()),
+    ];
+    for (body, headers) in &invalid {
+        let (status, answer) = core.call_with("PUT", &path, Some(body), headers).await;
+        assert_eq!(
+            (status, answer["code"].clone()),
+            (400, "invalid".into()),
+            "{body}"
+        );
+    }
+    assert!(seen.lock().unwrap().is_empty(), "nothing asked of the lake");
+
+    let (status, body) = core.call_with("PUT", &path, Some(&held), &admin).await;
+    assert_eq!(
+        (status, body["code"].clone()),
+        (502, "lake".into()),
+        "{body}"
+    );
+    assert_eq!(body["retryable"], true);
+    let text = body.to_string();
+    assert!(text.contains("policy: HTTP 403 AccessDenied"), "{text}");
+    assert!(!text.contains(GIVEN_SECRET) && !text.contains(SOURCE_SECRET));
+}
